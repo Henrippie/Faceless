@@ -40,8 +40,10 @@ export default async function DashboardPage() {
   const heroImages = videosWithUrls
     .map((v) => v.thumbnailUrl)
     .filter((src): src is string => Boolean(src));
+  // O corredor repete a lista pra preencher os trilhos, então até 1 thumbnail
+  // real já dá pra usar em vez do placeholder — sem precisar de um mínimo.
   const images =
-    heroImages.length >= 4
+    heroImages.length > 0
       ? heroImages.slice(0, 12).map((src) => ({ src, alt: "" }))
       : placeholderStreamImages();
 

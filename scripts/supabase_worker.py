@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -340,6 +341,47 @@ def _upload_result(supabase, owner_id: str, video_id: str, aspect_label: str, lo
     return storage_path
 
 
+def _generate_thumbnail(local_video_path: str) -> str | None:
+    """Extrai um frame do vídeo pronto pra usar de capa (grade da mesa e
+    card do vídeo). Best-effort: se o ffmpeg falhar, o vídeo continua
+    salvo normalmente, só sem thumbnail."""
+    from app.utils import utils
+
+    ffmpeg_bin = utils.get_ffmpeg_binary()
+    fd, thumb_path = tempfile.mkstemp(suffix=".jpg")
+    os.close(fd)
+    try:
+        completed = subprocess.run(
+            [
+                ffmpeg_bin,
+                "-y",
+                "-i",
+                local_video_path,
+                "-ss",
+                "00:00:01",
+                "-vframes",
+                "1",
+                "-q:v",
+                "3",
+                thumb_path,
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+        if completed.returncode != 0 or os.path.getsize(thumb_path) == 0:
+            logger.warning(
+                f"falha ao gerar thumbnail: {completed.stderr.decode(errors='ignore')[:300]}"
+            )
+            os.remove(thumb_path)
+            return None
+        return thumb_path
+    except Exception:  # noqa: BLE001 - thumbnail é best-effort, nunca deve falhar o vídeo
+        logger.exception("falha ao gerar thumbnail do vídeo")
+        if os.path.exists(thumb_path):
+            os.remove(thumb_path)
+        return None
+
+
 def process_one(supabase, video: dict[str, Any]) -> None:
     video_id = video["id"]
     owner_id = video["owner_id"]
@@ -378,6 +420,7 @@ def process_one(supabase, video: dict[str, Any]) -> None:
         update: dict[str, Any] = {"script": script_text}
         duration_seconds: float | None = None
         subtitle_storage_path: str | None = None
+        thumbnail_storage_path: str | None = None
         images_generated = 0
 
         for aspect_label in DEFAULT_ASPECTS:
@@ -391,6 +434,24 @@ def process_one(supabase, video: dict[str, Any]) -> None:
             update[f"{aspect_label}_path"] = storage_path
             duration_seconds = result.get("audio_duration") or duration_seconds
             images_generated += len(result.get("materials") or [])
+
+            if thumbnail_storage_path is None:
+                # Capa usada na galeria e na "mesa" (hero) — primeiro
+                # frame do primeiro formato gerado, sem depender de qual
+                # aspecto o canal ativou.
+                thumb_local = _generate_thumbnail(local_path)
+                if thumb_local:
+                    thumbnail_storage_path = f"{owner_id}/{video_id}/thumbnail.jpg"
+                    with open(thumb_local, "rb") as fh:
+                        supabase.storage.from_(STORAGE_BUCKET).upload(
+                            thumbnail_storage_path,
+                            fh.read(),
+                            {"content-type": "image/jpeg", "upsert": "true"},
+                        )
+                    try:
+                        os.remove(thumb_local)
+                    except OSError:
+                        pass
 
             local_subtitle_path = result.get("subtitle_path")
             if subtitle_storage_path is None and local_subtitle_path and os.path.exists(
@@ -408,6 +469,8 @@ def process_one(supabase, video: dict[str, Any]) -> None:
             update["duration_seconds"] = duration_seconds
         if subtitle_storage_path is not None:
             update["subtitle_path"] = subtitle_storage_path
+        if thumbnail_storage_path is not None:
+            update["thumbnail_path"] = thumbnail_storage_path
         if images_generated:
             update["est_cost_usd"] = _estimate_cost_usd(
                 script_text, images_generated, channel.get("tts_provider") or "edge"
