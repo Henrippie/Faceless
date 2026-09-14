@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      api_credentials: {
+        Row: {
+          elevenlabs_api_key_secret_id: string | null
+          image_api_key_secret_id: string | null
+          image_base_url: string
+          image_model: string
+          llm_api_key_secret_id: string | null
+          llm_model: string
+          llm_provider: string
+          owner_id: string
+          updated_at: string
+        }
+        Insert: {
+          elevenlabs_api_key_secret_id?: string | null
+          image_api_key_secret_id?: string | null
+          image_base_url?: string
+          image_model?: string
+          llm_api_key_secret_id?: string | null
+          llm_model?: string
+          llm_provider?: string
+          owner_id: string
+          updated_at?: string
+        }
+        Update: {
+          elevenlabs_api_key_secret_id?: string | null
+          image_api_key_secret_id?: string | null
+          image_base_url?: string
+          image_model?: string
+          llm_api_key_secret_id?: string | null
+          llm_model?: string
+          llm_provider?: string
+          owner_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       channels: {
         Row: {
           avatar_url: string | null
@@ -28,6 +64,7 @@ export type Database = {
           owner_id: string
           slug: string
           status: string
+          tts_provider: string
           updated_at: string
           video_script_prompt: string
           voice_name: string
@@ -45,6 +82,7 @@ export type Database = {
           owner_id?: string
           slug: string
           status?: string
+          tts_provider?: string
           updated_at?: string
           video_script_prompt?: string
           voice_name?: string
@@ -62,6 +100,7 @@ export type Database = {
           owner_id?: string
           slug?: string
           status?: string
+          tts_provider?: string
           updated_at?: string
           video_script_prompt?: string
           voice_name?: string
@@ -132,7 +171,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      set_elevenlabs_credential: {
+        Args: { p_api_key: string }
+        Returns: undefined
+      }
+      set_image_credential: {
+        Args: { p_api_key: string; p_base_url: string; p_model: string }
+        Returns: undefined
+      }
+      set_llm_credential: {
+        Args: { p_api_key: string; p_model: string; p_provider: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never

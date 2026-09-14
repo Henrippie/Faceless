@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/actions";
 import { Button } from "@/components/ui/button";
-import { Clapperboard, LayoutGrid, Radio } from "lucide-react";
+import { Clapperboard, LayoutGrid, Radio, Settings } from "lucide-react";
 
 export async function NavBar() {
   const supabase = await createClient();
@@ -28,6 +28,12 @@ export async function NavBar() {
             <Button variant="ghost" size="sm" className="gap-1.5">
               <Radio className="h-4 w-4" />
               Canais
+            </Button>
+          </Link>
+          <Link href="/settings">
+            <Button variant="ghost" size="sm" className="gap-1.5">
+              <Settings className="h-4 w-4" />
+              Configurações
             </Button>
           </Link>
           {user ? (

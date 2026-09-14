@@ -61,7 +61,10 @@ export function ChannelCard({ channel }: { channel: Channel }) {
       </CardHeader>
       <CardContent className="space-y-1 text-xs text-muted-foreground">
         <p>Idioma: {channel.language}</p>
-        <p>Voz: {channel.voice_name || "padrão"}</p>
+        <p>
+          Narrador: {channel.tts_provider === "elevenlabs" ? "ElevenLabs" : "Edge TTS"} —{" "}
+          {channel.voice_name || "padrão"}
+        </p>
         <p>Formatos: {channel.formats.join(", ") || "vertical, horizontal"}</p>
       </CardContent>
       <CardFooter className="justify-end gap-2">

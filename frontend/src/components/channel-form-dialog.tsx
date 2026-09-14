@@ -15,6 +15,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Plus } from "lucide-react";
 import { createChannel } from "@/app/actions";
 import { toast } from "sonner";
@@ -24,9 +31,15 @@ const EMPTY_FORM = {
   niche: "",
   language: "pt-BR",
   voiceName: "pt-BR-AntonioNeural",
+  ttsProvider: "edge",
   videoScriptPrompt: "",
   customSystemPrompt: "",
   imagePromptTemplate: "",
+};
+
+const TTS_LABELS: Record<string, string> = {
+  edge: "Edge TTS (grátis)",
+  elevenlabs: "ElevenLabs",
 };
 
 export function ChannelFormDialog({
@@ -120,14 +133,59 @@ export function ChannelFormDialog({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="voiceName">Voz (Edge TTS)</Label>
-                <Input
-                  id="voiceName"
-                  placeholder="pt-BR-AntonioNeural"
-                  value={form.voiceName}
-                  onChange={(e) => update("voiceName", e.target.value)}
-                />
+                <Label>Narrador</Label>
+                <Select
+                  value={form.ttsProvider}
+                  onValueChange={(value) => {
+                    const provider = value ?? "edge";
+                    setForm((prev) => ({
+                      ...prev,
+                      ttsProvider: provider,
+                      voiceName:
+                        provider === "elevenlabs"
+                          ? prev.voiceName.startsWith("elevenlabs:")
+                            ? prev.voiceName
+                            : ""
+                          : prev.voiceName === "" || prev.voiceName.startsWith("elevenlabs:")
+                            ? "pt-BR-AntonioNeural"
+                            : prev.voiceName,
+                    }));
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Narrador">
+                      {(value: string) => TTS_LABELS[value] ?? value}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="edge">Edge TTS (grátis)</SelectItem>
+                    <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="voiceName">
+                {form.ttsProvider === "elevenlabs" ? "ID da voz (ElevenLabs)" : "Voz (Edge TTS)"}
+              </Label>
+              <Input
+                id="voiceName"
+                placeholder={
+                  form.ttsProvider === "elevenlabs"
+                    ? "elevenlabs:21m00Tcm4TlvDq8ikWAM"
+                    : "pt-BR-AntonioNeural"
+                }
+                value={form.voiceName}
+                onChange={(e) => update("voiceName", e.target.value)}
+              />
+              {form.ttsProvider === "elevenlabs" ? (
+                <p className="text-xs text-muted-foreground">
+                  Precisa começar com <code>elevenlabs:</code> seguido do ID da
+                  voz (pegue em elevenlabs.io/app/voice-library) e da chave
+                  configurada em Configurações.
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-2">

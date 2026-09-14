@@ -17,8 +17,11 @@ Uso:
 
 A chave service_role fica em Project Settings > API no painel do Supabase.
 Ela ignora RLS de propósito — é o que permite o worker gerar vídeos para
-qualquer canal do dono da conta. Nunca coloque essa chave no frontend nem
-a exponha publicamente.
+qualquer canal do dono da conta, e ler as chaves de LLM/imagem/ElevenLabs
+que o dono salvou em /settings no painel (cifradas via Supabase Vault,
+lidas aqui através da RPC get_credentials_for_owner, exclusiva do
+service_role). Nunca coloque a service_role key no frontend nem a exponha
+publicamente.
 """
 
 from __future__ import annotations
@@ -74,10 +77,74 @@ def _fetch_channel(supabase, channel_id: str) -> dict[str, Any]:
     return response.data
 
 
-def _generate_script(channel: dict[str, Any], subject: str) -> str:
+def _fetch_credentials(supabase, owner_id: str) -> dict[str, Any]:
+    """Busca as chaves de API salvas pelo dono em /settings, já
+    descriptografadas do Vault. Só funciona com a service_role key (a RPC
+    tem EXECUTE revogado de anon/authenticated de propósito)."""
+    response = supabase.rpc(
+        "get_credentials_for_owner", {"p_owner_id": owner_id}
+    ).execute()
+    return response.data or {}
+
+
+def _apply_llm_credentials(creds: dict[str, Any]) -> None:
+    from app.config import config
+
+    provider = (creds.get("llm_provider") or "").strip()
+    api_key = (creds.get("llm_api_key") or "").strip()
+    if not provider or not api_key:
+        raise RuntimeError(
+            "chave de LLM não configurada. Adicione uma em /settings antes de gerar vídeos."
+        )
+
+    model = (creds.get("llm_model") or "").strip()
+    config.app["llm_provider"] = provider
+    config.app[f"{provider}_api_key"] = api_key
+    if model:
+        config.app[f"{provider}_model_name"] = model
+
+
+def _apply_image_credentials(creds: dict[str, Any]) -> None:
+    from app.config import config
+
+    base_url = (creds.get("image_base_url") or "").strip()
+    model = (creds.get("image_model") or "").strip()
+    api_key = (creds.get("image_api_key") or "").strip()
+    if not base_url or not model:
+        raise RuntimeError(
+            "geração de imagem não configurada. Adicione base URL e modelo em "
+            "/settings antes de gerar vídeos."
+        )
+
+    config.app["openai_image_base_url"] = base_url
+    config.app["openai_image_model"] = model
+    config.app["openai_image_api_keys"] = [api_key] if api_key else []
+
+
+def _apply_elevenlabs_credentials(creds: dict[str, Any], voice_name: str) -> None:
+    from app.config import config
+
+    if not voice_name.startswith("elevenlabs:"):
+        raise RuntimeError(
+            "canal está com narrador ElevenLabs, mas a voz precisa começar com "
+            "'elevenlabs:' seguido do ID da voz."
+        )
+
+    api_key = (creds.get("elevenlabs_api_key") or "").strip()
+    if not api_key:
+        raise RuntimeError(
+            "chave da ElevenLabs não configurada. Adicione uma em /settings ou "
+            "troque o narrador do canal para Edge TTS."
+        )
+    config.elevenlabs["api_key"] = api_key
+
+
+def _generate_script(channel: dict[str, Any], subject: str, creds: dict[str, Any]) -> str:
     from app.models.schema import VideoParams
     from app.services import task as tm
     from app.utils import utils
+
+    _apply_llm_credentials(creds)
 
     params = VideoParams(
         video_subject=subject,
@@ -95,12 +162,22 @@ def _generate_script(channel: dict[str, Any], subject: str) -> str:
 
 
 def _generate_video_for_aspect(
-    channel: dict[str, Any], subject: str, script_text: str, aspect_label: str
+    channel: dict[str, Any],
+    subject: str,
+    script_text: str,
+    aspect_label: str,
+    creds: dict[str, Any],
 ) -> dict[str, Any]:
     from app.config import config
     from app.models.schema import VideoParams
     from app.services import task as tm
     from app.utils import utils
+
+    _apply_image_credentials(creds)
+
+    voice_name = channel.get("voice_name") or ""
+    if channel.get("tts_provider") == "elevenlabs":
+        _apply_elevenlabs_credentials(creds, voice_name)
 
     # openai_image_prompt_template é uma configuração global do app (não faz
     # parte de VideoParams), então trocamos ela por job para dar a cada canal
@@ -113,7 +190,7 @@ def _generate_video_for_aspect(
         video_subject=subject,
         video_script=script_text,
         video_language=channel.get("language") or "",
-        voice_name=channel.get("voice_name") or "",
+        voice_name=voice_name,
         video_aspect=ASPECT_RATIOS[aspect_label],
         video_source="openai_image",
     )
@@ -149,8 +226,9 @@ def process_one(supabase, video: dict[str, Any]) -> None:
 
     try:
         channel = _fetch_channel(supabase, video["channel_id"])
+        creds = _fetch_credentials(supabase, owner_id)
         formats = channel.get("formats") or list(DEFAULT_ASPECTS)
-        script_text = video.get("script") or _generate_script(channel, subject)
+        script_text = video.get("script") or _generate_script(channel, subject, creds)
 
         update: dict[str, Any] = {"script": script_text}
         duration_seconds: float | None = None
@@ -158,7 +236,9 @@ def process_one(supabase, video: dict[str, Any]) -> None:
         for aspect_label in DEFAULT_ASPECTS:
             if aspect_label not in formats:
                 continue
-            result = _generate_video_for_aspect(channel, subject, script_text, aspect_label)
+            result = _generate_video_for_aspect(
+                channel, subject, script_text, aspect_label, creds
+            )
             local_path = result["videos"][0]
             storage_path = _upload_result(supabase, owner_id, video_id, aspect_label, local_path)
             update[f"{aspect_label}_path"] = storage_path

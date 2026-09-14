@@ -30,6 +30,7 @@ export type CreateChannelInput = {
   niche: string;
   language: string;
   voiceName: string;
+  ttsProvider: string;
   videoScriptPrompt: string;
   customSystemPrompt: string;
   imagePromptTemplate: string;
@@ -73,6 +74,7 @@ export async function createChannel(input: CreateChannelInput) {
     niche: input.niche,
     language: input.language,
     voice_name: input.voiceName,
+    tts_provider: input.ttsProvider,
     video_script_prompt: input.videoScriptPrompt,
     custom_system_prompt: input.customSystemPrompt,
     image_prompt_template: input.imagePromptTemplate,
@@ -140,4 +142,43 @@ export async function deleteVideo(videoId: string) {
   const { error } = await supabase.from("videos").delete().eq("id", videoId);
   if (error) throw new Error(error.message);
   revalidatePath("/");
+}
+
+export async function saveLlmCredential(input: {
+  provider: string;
+  model: string;
+  apiKey: string;
+}) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_llm_credential", {
+    p_provider: input.provider,
+    p_model: input.model,
+    p_api_key: input.apiKey,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/settings");
+}
+
+export async function saveImageCredential(input: {
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+}) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_image_credential", {
+    p_base_url: input.baseUrl,
+    p_model: input.model,
+    p_api_key: input.apiKey,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/settings");
+}
+
+export async function saveElevenlabsCredential(apiKey: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_elevenlabs_credential", {
+    p_api_key: apiKey,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/settings");
 }
