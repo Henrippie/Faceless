@@ -23,14 +23,17 @@ function ConfiguredBadge({ configured }: { configured: boolean }) {
 export function LlmCredentialForm({
   initialProvider,
   initialModel,
+  initialBaseUrl,
   configured,
 }: {
   initialProvider: string;
   initialModel: string;
+  initialBaseUrl: string;
   configured: boolean;
 }) {
   const [provider, setProvider] = useState(initialProvider);
   const [model, setModel] = useState(initialModel);
+  const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [apiKey, setApiKey] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -38,7 +41,7 @@ export function LlmCredentialForm({
     event.preventDefault();
     startTransition(async () => {
       try {
-        await saveLlmCredential({ provider, model, apiKey });
+        await saveLlmCredential({ provider, model, apiKey, baseUrl });
         setApiKey("");
         toast.success("Chave de LLM salva.");
       } catch (error) {
@@ -81,6 +84,21 @@ export function LlmCredentialForm({
                 onChange={(e) => setModel(e.target.value)}
               />
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="llm-base-url">Base URL (opcional)</Label>
+            <Input
+              id="llm-base-url"
+              placeholder="deixe em branco pra usar o padrão do provedor"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Só preencha se o provedor tiver mais de uma região/endpoint — ex.
+              Kimi conta Global usa{" "}
+              <code className="text-[11px]">https://api.moonshot.ai/v1</code>,
+              diferente do padrão (China).
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="llm-key">Chave de API</Label>

@@ -21,6 +21,7 @@ export type Database = {
           image_base_url: string
           image_model: string
           llm_api_key_secret_id: string | null
+          llm_base_url: string
           llm_model: string
           llm_provider: string
           owner_id: string
@@ -32,6 +33,7 @@ export type Database = {
           image_base_url?: string
           image_model?: string
           llm_api_key_secret_id?: string | null
+          llm_base_url?: string
           llm_model?: string
           llm_provider?: string
           owner_id: string
@@ -43,6 +45,7 @@ export type Database = {
           image_base_url?: string
           image_model?: string
           llm_api_key_secret_id?: string | null
+          llm_base_url?: string
           llm_model?: string
           llm_provider?: string
           owner_id?: string
@@ -171,6 +174,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_credentials_for_owner: { Args: { p_owner_id: string }; Returns: Json }
       set_elevenlabs_credential: {
         Args: { p_api_key: string }
         Returns: undefined
@@ -180,7 +184,12 @@ export type Database = {
         Returns: undefined
       }
       set_llm_credential: {
-        Args: { p_api_key: string; p_model: string; p_provider: string }
+        Args: {
+          p_api_key: string
+          p_base_url?: string
+          p_model: string
+          p_provider: string
+        }
         Returns: undefined
       }
     }

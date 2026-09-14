@@ -98,10 +98,13 @@ def _apply_llm_credentials(creds: dict[str, Any]) -> None:
         )
 
     model = (creds.get("llm_model") or "").strip()
+    base_url = (creds.get("llm_base_url") or "").strip()
     config.app["llm_provider"] = provider
     config.app[f"{provider}_api_key"] = api_key
     if model:
         config.app[f"{provider}_model_name"] = model
+    if base_url:
+        config.app[f"{provider}_base_url"] = base_url
 
 
 def _apply_image_credentials(creds: dict[str, Any]) -> None:

@@ -29,6 +29,7 @@ export default async function SettingsPage() {
         <LlmCredentialForm
           initialProvider={credentials?.llm_provider ?? "moonshot"}
           initialModel={credentials?.llm_model ?? ""}
+          initialBaseUrl={credentials?.llm_base_url ?? ""}
           configured={Boolean(credentials?.llm_api_key_secret_id)}
         />
         <ImageCredentialForm

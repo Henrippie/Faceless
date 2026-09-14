@@ -148,12 +148,14 @@ export async function saveLlmCredential(input: {
   provider: string;
   model: string;
   apiKey: string;
+  baseUrl: string;
 }) {
   const supabase = await createClient();
   const { error } = await supabase.rpc("set_llm_credential", {
     p_provider: input.provider,
     p_model: input.model,
     p_api_key: input.apiKey,
+    p_base_url: input.baseUrl,
   });
   if (error) throw new Error(error.message);
   revalidatePath("/settings");
