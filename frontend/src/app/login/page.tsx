@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,22 +15,31 @@ import {
 } from "@/components/ui/card";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">(
-    "idle",
-  );
+  const [password, setPassword] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [errorMessage, setErrorMessage] = useState("");
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("sending");
+    setStatus("loading");
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
+      password,
     });
-    setStatus(error ? "error" : "sent");
+    if (error) {
+      setStatus("error");
+      setErrorMessage(
+        error.message === "Invalid login credentials"
+          ? "E-mail ou senha incorretos."
+          : error.message,
+      );
+      return;
+    }
+    router.replace("/");
+    router.refresh();
   }
 
   return (
@@ -42,44 +52,48 @@ export default function LoginPage() {
         <CardHeader>
           <CardTitle className="text-xl">Central de Canais Dark</CardTitle>
           <CardDescription>
-            Entre com seu e-mail para acessar o painel dos seus canais e
-            vídeos.
+            Entre com seu e-mail e senha para acessar o painel dos seus
+            canais e vídeos.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {status === "sent" ? (
-            <p className="text-sm text-muted-foreground">
-              Enviamos um link de acesso para <strong>{email}</strong>. Abra
-              seu e-mail e clique no link para entrar.
-            </p>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">E-mail</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  required
-                  autoFocus
-                  placeholder="voce@exemplo.com"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                />
-              </div>
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={status === "sending"}
-              >
-                {status === "sending" ? "Enviando..." : "Enviar link de acesso"}
-              </Button>
-              {status === "error" ? (
-                <p className="text-sm text-destructive">
-                  Não foi possível enviar o link. Tente novamente.
-                </p>
-              ) : null}
-            </form>
-          )}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">E-mail</Label>
+              <Input
+                id="email"
+                type="email"
+                required
+                autoFocus
+                autoComplete="email"
+                placeholder="voce@exemplo.com"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Senha</Label>
+              <Input
+                id="password"
+                type="password"
+                required
+                autoComplete="current-password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </div>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={status === "loading"}
+            >
+              {status === "loading" ? "Entrando..." : "Entrar"}
+            </Button>
+            {status === "error" ? (
+              <p className="text-sm text-destructive">{errorMessage}</p>
+            ) : null}
+          </form>
         </CardContent>
       </Card>
     </div>
