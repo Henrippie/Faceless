@@ -1,0 +1,68 @@
+name: Process video queue
+
+# Consome a fila de vídeos do Supabase (scripts/supabase_worker.py) sem
+# precisar de nenhum servidor rodando o tempo todo. O repositório é público,
+# então os minutos do runner não custam nada.
+#
+# Precisa de 2 secrets do repositório (Settings > Secrets and variables >
+# Actions > New repository secret):
+#   SUPABASE_URL                a URL do projeto (https://xxxx.supabase.co)
+#   SUPABASE_SERVICE_ROLE_KEY   a chave service_role (Project Settings > API)
+#
+# As chaves de LLM/imagem/ElevenLabs de cada usuário NÃO entram aqui — o
+# worker já busca elas do Supabase Vault por vídeo, via get_credentials_for_owner.
+
+on:
+  schedule:
+    # A cada 10 minutos. Cron do GitHub Actions roda em UTC.
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  # Evita dois runs processando a fila ao mesmo tempo (dois workers podem
+  # pegar o mesmo vídeo "queued" e duplicar trabalho). Um novo agendamento
+  # que caia em cima de um run ainda ativo fica esperando, não roda junto.
+  group: video-queue-worker
+  cancel-in-progress: false
+
+jobs:
+  process:
+    name: Process queued videos
+    runs-on: ubuntu-latest
+    # Um vídeo (roteiro + áudio + imagens + montagem, nos 2 formatos) já
+    # levou ~26 min num teste real; a margem aqui é só pra garantir que um
+    # job travado não fique preso indefinidamente, não pra cortar um vídeo
+    # em andamento.
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --python 3.11
+
+      - name: Confirm ffmpeg is available
+        run: ffmpeg -version
+
+      - name: Process one queued video
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        # --once: processa no máximo 1 vídeo e sai (fila vazia = job termina
+        # em segundos). Sem --once o job ficaria dormindo até o timeout
+        # mesmo sem nada pra fazer, desperdiçando minutos do runner à toa.
+        # Vários vídeos na fila esvaziam ao longo de execuções sucessivas a
+        # cada 10 min; o concurrency group acima impede runs sobrepostos se
+        # um vídeo demorar mais que isso pra terminar.
+        run: uv run --no-sync python scripts/supabase_worker.py --once

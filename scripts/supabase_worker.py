@@ -615,17 +615,27 @@ def main(argv: list[str] | None = None) -> int:
 
     while True:
         video = _fetch_next_queued_video(supabase)
-        if video is None:
+        if video is not None:
+            process_one(supabase, video)
             if args.once:
-                logger.info("fila vazia, nada para processar")
                 return 0
-            time.sleep(args.interval)
             continue
 
-        process_one(supabase, video)
+        # Fila de geração vazia: confere se há vídeo aprovado esperando
+        # publicação (approve_video RPC). Sem isso o worker nunca chamava
+        # _publish_video — a publicação automática ficava parada mesmo com
+        # o worker rodando.
+        publish_video = _fetch_next_approved_video(supabase)
+        if publish_video is not None:
+            _publish_video(supabase, publish_video)
+            if args.once:
+                return 0
+            continue
 
         if args.once:
+            logger.info("fila vazia, nada para processar")
             return 0
+        time.sleep(args.interval)
 
 
 if __name__ == "__main__":
