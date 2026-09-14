@@ -104,6 +104,31 @@ python main.py        # sobe a API FastAPI em :8080, docs em /docs
 python cli.py --help  # geração via linha de comando, útil para automatizar
 ```
 
+### 5. Gerar as duas versões do vídeo (vertical + horizontal) de uma vez
+
+A WebUI gera um vídeo por vez, em um aspecto por vez. Para publicar o mesmo
+vídeo em Reels/TikTok/Shorts/Kwai (vertical) **e** no YouTube tradicional
+(horizontal) a partir da mesma narração, use o script
+`scripts/gerar_dois_formatos.py`:
+
+```bash
+uv run python scripts/gerar_dois_formatos.py --video-subject "Davi e Golias"
+```
+
+Ele gera o roteiro **uma única vez** (ou usa o texto de `--video-script`, se
+você já tiver um pronto) e reaproveita a mesma narração nas duas montagens,
+para garantir que o áudio seja idêntico nos dois formatos — só a
+imagem/composição muda por aspecto:
+
+- `saida/<slug>/vertical.mp4` — 9:16, para Reels, TikTok, YouTube Shorts e Kwai
+- `saida/<slug>/horizontal.mp4` — 16:9, para YouTube
+
+Aceita as mesmas opções de `cli.py` (voz, fonte de imagens, música, legenda
+etc.) exceto `--video-aspect`, `--stop-at`, `--batch-file` e `--task-id`, que
+o script controla para gerar as duas versões. Use `--slug` para nomear a
+pasta de saída manualmente. Veja `uv run python scripts/gerar_dois_formatos.py --help`
+para todas as opções.
+
 ## Publicação automática
 
 O projeto já traz integração com o [Upload-Post](https://upload-post.com/)
