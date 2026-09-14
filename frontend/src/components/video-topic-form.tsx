@@ -133,8 +133,9 @@ export function VideoTopicForm({
                 key={topic}
                 type="button"
                 onClick={() => setSubject(topic)}
+                title={topic}
                 className={cn(
-                  "rounded-full border px-2.5 py-1 text-xs transition-colors",
+                  "max-w-full truncate rounded-full border px-2.5 py-1 text-xs transition-colors",
                   subject === topic
                     ? "border-amber-500/40 bg-amber-500/15 text-amber-400"
                     : "border-border text-muted-foreground hover:border-amber-500/30 hover:text-foreground",

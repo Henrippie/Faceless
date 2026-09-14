@@ -13,6 +13,24 @@ const DEFAULT_LLM_BASE_URLS: Record<string, string> = {
   gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
 };
 
+// Alguns provedores (ex. Kimi/Moonshot com plano de concorrência baixa)
+// devolvem 429 "max organization concurrency" sob uso simultâneo — comum
+// quando o worker está gerando um roteiro e o painel pede uma sugestão ao
+// mesmo tempo. Uma única espera curta e nova tentativa resolve a maioria
+// dos casos sem expor o erro bruto pro usuário.
+async function fetchWithRetry(url: string, init: RequestInit, retries = 2) {
+  let lastResponse: Response | null = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(url, init);
+    if (response.status !== 429) return response;
+    lastResponse = response;
+    if (attempt < retries) {
+      await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+    }
+  }
+  return lastResponse!;
+}
+
 const DIACRITICS_PATTERN = new RegExp("[\\u0300-\\u036f]", "g");
 
 function slugify(text: string) {
@@ -276,7 +294,7 @@ export async function suggestVideoTopics(channelId: string): Promise<string[]> {
     (channel.custom_system_prompt || "").trim() ||
     `Você é o roteirista de um canal chamado "${channel.name}" sobre ${channel.niche || "temas diversos"}.`;
 
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+  const response = await fetchWithRetry(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -292,12 +310,16 @@ export async function suggestVideoTopics(channelId: string): Promise<string[]> {
             `Idioma do canal: ${channel.language || "pt-BR"}. Estilo: ${
               channel.video_script_prompt || "sem preferência específica"
             }.\n\n` +
-            "Sugira exatamente 5 temas curtos e específicos para o próximo vídeo " +
-            "desse canal, bem diferentes entre si. Responda só com uma lista " +
-            "numerada de 1 a 5, uma linha por tema, sem explicações extras.",
+            "Sugira exatamente 5 temas para o próximo vídeo desse canal, bem " +
+            "diferentes entre si. Cada tema deve ser só um título curto (até " +
+            "10 palavras, no máximo ~80 caracteres) — NUNCA o roteiro ou um " +
+            "resumo da história. Responda só com uma lista numerada de 1 a " +
+            "5, uma linha por tema, sem explicações extras.",
         },
       ],
-      temperature: 0.9,
+      // Sem temperature explícito: alguns modelos (ex. Kimi K2 Thinking) só
+      // aceitam o valor padrão e rejeitam qualquer override com 400. O motor
+      // Python (app/services/llm.py) também nunca envia esse campo.
     }),
   });
 
@@ -310,14 +332,22 @@ export async function suggestVideoTopics(channelId: string): Promise<string[]> {
 
   const json = await response.json();
   const content: string = json?.choices?.[0]?.message?.content ?? "";
+  const MAX_TOPIC_LENGTH = 100;
   const topics = content
     .split("\n")
     .map((line: string) => line.replace(/^\s*[\d.\-*)]+\s*/, "").trim())
     .filter(Boolean)
+    // Alguns modelos ignoram o limite de tamanho pedido e devolvem um
+    // roteiro inteiro em vez de um título — descarta pra não quebrar o
+    // layout da pílula na tela.
+    .map((topic: string) =>
+      topic.length > MAX_TOPIC_LENGTH ? null : topic,
+    )
+    .filter((topic): topic is string => topic !== null)
     .slice(0, 5);
 
   if (topics.length === 0) {
-    throw new Error("o modelo não devolveu sugestões utilizáveis.");
+    throw new Error("o modelo não devolveu sugestões utilizáveis (título muito longo).");
   }
   return topics;
 }
@@ -354,7 +384,7 @@ export async function testVoiceSample(
     );
   }
 
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
     {
       method: "POST",
@@ -400,7 +430,7 @@ export async function testImageStyle(promptTemplate: string): Promise<string> {
       ? trimmedTemplate.replace("{term}", term)
       : trimmedTemplate || term;
 
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/images/generations`, {
+  const response = await fetchWithRetry(`${baseUrl.replace(/\/$/, "")}/images/generations`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
