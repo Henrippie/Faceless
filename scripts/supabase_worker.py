@@ -38,7 +38,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from loguru import logger
 
 STORAGE_BUCKET = "videos"
-DEFAULT_PARAGRAPH_NUMBER = 3
+# 1 parágrafo casa melhor com Shorts/Reels de ~60s; combine com uma meta de
+# palavras no video_script_prompt do canal para controlar a duração de perto.
+DEFAULT_PARAGRAPH_NUMBER = 1
 DEFAULT_ASPECTS = ("vertical", "horizontal")
 ASPECT_RATIOS = {"vertical": "9:16", "horizontal": "16:9"}
 
