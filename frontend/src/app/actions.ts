@@ -471,6 +471,34 @@ export async function deleteVideo(videoId: string) {
   revalidatePath("/");
 }
 
+export async function regenerateVideo(videoId: string) {
+  const supabase = await createClient();
+  // Mantém o roteiro (o worker reaproveita video.script se já existir) e só
+  // limpa mídia/aprovação/publicação — regenera imagem, áudio e vídeo do zero.
+  const { error } = await supabase
+    .from("videos")
+    .update({
+      status: "queued",
+      error: null,
+      vertical_path: null,
+      horizontal_path: null,
+      thumbnail_path: null,
+      subtitle_path: null,
+      duration_seconds: null,
+      est_cost_usd: null,
+      approved_at: null,
+      scheduled_at: null,
+      publish_state: "idle",
+      publish_error: null,
+      publish_results: {},
+      progress_stage: null,
+      progress_detail: {},
+    })
+    .eq("id", videoId);
+  if (error) throw new Error(error.message);
+  revalidatePath("/");
+}
+
 export async function saveLlmCredential(input: {
   provider: string;
   model: string;

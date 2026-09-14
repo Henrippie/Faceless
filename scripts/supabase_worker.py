@@ -30,6 +30,7 @@ import argparse
 import os
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +46,65 @@ STORAGE_BUCKET = "videos"
 DEFAULT_PARAGRAPH_NUMBER = 1
 DEFAULT_ASPECTS = ("vertical", "horizontal")
 ASPECT_RATIOS = {"vertical": "9:16", "horizontal": "16:9"}
+
+# Faixas de progresso (0-100) que o pipeline do MPT já reporta internamente
+# via app.services.state, mapeadas pra um rótulo em português pro stepper.
+_STAGE_LABELS_BY_PERCENT = (
+    (10, "Gerando roteiro"),
+    (20, "Selecionando palavras-chave"),
+    (30, "Gerando narração"),
+    (40, "Gerando legenda"),
+    (90, "Baixando/gerando imagens das cenas"),
+    (99, "Compilando vídeo"),
+    (100, "Finalizando"),
+)
+
+
+def _stage_label_for_percent(percent: float) -> str:
+    for threshold, label in _STAGE_LABELS_BY_PERCENT:
+        if percent <= threshold:
+            return label
+    return "Processando"
+
+
+def _run_with_progress(supabase, video_id: str, task_id: str, aspect_label: str | None, fn):
+    """Roda ``fn()`` (uma chamada bloqueante a ``tm.start``) numa thread e,
+    em paralelo, faz polling de ``app.services.state`` — que o pipeline do
+    MPT já atualiza internamente a cada etapa — pra gravar um progresso
+    granular em ``videos.progress_stage``/``progress_detail``. Isso troca o
+    spinner cego por um checklist ao vivo sem precisar reescrever o
+    pipeline em etapas separadas."""
+    from app.services import state as sm
+
+    stop_event = threading.Event()
+    result_holder: dict[str, Any] = {}
+
+    def poll():
+        last_percent = -1
+        while not stop_event.is_set():
+            task_state = sm.state.get_task(task_id) or {}
+            percent = task_state.get("progress", 0) or 0
+            if percent != last_percent:
+                last_percent = percent
+                try:
+                    supabase.table("videos").update(
+                        {
+                            "progress_stage": _stage_label_for_percent(percent),
+                            "progress_detail": {"percent": percent, "aspect": aspect_label},
+                        }
+                    ).eq("id", video_id).execute()
+                except Exception:  # noqa: BLE001 - progresso é best-effort
+                    logger.exception(f"falha ao gravar progresso do vídeo {video_id}")
+            stop_event.wait(2.0)
+
+    thread = threading.Thread(target=poll, daemon=True)
+    thread.start()
+    try:
+        result_holder["value"] = fn()
+    finally:
+        stop_event.set()
+        thread.join(timeout=5)
+    return result_holder["value"]
 
 
 def _get_supabase_client():
@@ -146,7 +206,9 @@ def _apply_elevenlabs_credentials(creds: dict[str, Any], voice_name: str) -> Non
     config.elevenlabs["api_key"] = api_key
 
 
-def _generate_script(channel: dict[str, Any], subject: str, creds: dict[str, Any]) -> str:
+def _generate_script(
+    supabase, video_id: str, channel: dict[str, Any], subject: str, creds: dict[str, Any]
+) -> str:
     from app.models.schema import VideoParams
     from app.services import task as tm
     from app.utils import utils
@@ -162,7 +224,13 @@ def _generate_script(channel: dict[str, Any], subject: str, creds: dict[str, Any
         voice_name=channel.get("voice_name") or "",
     )
     task_id = utils.get_uuid()
-    result = tm.start(task_id=task_id, params=params, stop_at="script")
+    result = _run_with_progress(
+        supabase,
+        video_id,
+        task_id,
+        None,
+        lambda: tm.start(task_id=task_id, params=params, stop_at="script"),
+    )
     if not result or "script" not in result:
         raise RuntimeError(f"falha ao gerar roteiro (task_id={task_id}): {result}")
     return result["script"]
@@ -170,6 +238,7 @@ def _generate_script(channel: dict[str, Any], subject: str, creds: dict[str, Any
 
 def _generate_video_for_aspect(
     supabase,
+    video_id: str,
     channel: dict[str, Any],
     subject: str,
     script_text: str,
@@ -219,7 +288,13 @@ def _generate_video_for_aspect(
             **bgm_kwargs,
         )
         task_id = utils.get_uuid()
-        result = tm.start(task_id=task_id, params=params, stop_at="video")
+        result = _run_with_progress(
+            supabase,
+            video_id,
+            task_id,
+            aspect_label,
+            lambda: tm.start(task_id=task_id, params=params, stop_at="video"),
+        )
         if not result or not result.get("videos"):
             raise RuntimeError(
                 f"falha ao gerar vídeo {aspect_label} (task_id={task_id}): {result}"
@@ -231,6 +306,27 @@ def _generate_video_for_aspect(
                 os.remove(bgm_local_path)
             except OSError:
                 pass
+
+
+# Referências ASPRE, não fatura real: preços variam por provedor, modelo,
+# plano e promoção. Servem só pra dar uma ordem de grandeza de custo por
+# vídeo — a UI deixa claro que é aproximado ("~US$ X").
+_EST_COST_PER_IMAGE_USD = 0.04
+_EST_COST_PER_ELEVENLABS_CHAR_USD = 0.00015
+_EST_COST_PER_LLM_1K_TOKENS_USD = 0.01
+
+
+def _estimate_cost_usd(script_text: str, images_generated: int, tts_provider: str) -> float:
+    script_chars = len(script_text or "")
+    est_tokens = script_chars / 4
+    llm_cost = (est_tokens / 1000) * _EST_COST_PER_LLM_1K_TOKENS_USD
+    image_cost = images_generated * _EST_COST_PER_IMAGE_USD
+    tts_cost = (
+        script_chars * _EST_COST_PER_ELEVENLABS_CHAR_USD
+        if tts_provider == "elevenlabs"
+        else 0.0
+    )
+    return round(llm_cost + image_cost + tts_cost, 4)
 
 
 def _upload_result(supabase, owner_id: str, video_id: str, aspect_label: str, local_path: str) -> str:
@@ -250,16 +346,23 @@ def process_one(supabase, video: dict[str, Any]) -> None:
     subject = video["subject"]
 
     logger.info(f"processando vídeo {video_id}: {subject!r}")
-    supabase.table("videos").update({"status": "generating", "error": None}).eq(
-        "id", video_id
-    ).execute()
+    supabase.table("videos").update(
+        {
+            "status": "generating",
+            "error": None,
+            "progress_stage": None,
+            "progress_detail": {},
+        }
+    ).eq("id", video_id).execute()
 
     try:
         channel = _fetch_channel(supabase, video["channel_id"])
         creds = _fetch_credentials(supabase, owner_id)
         formats = channel.get("formats") or list(DEFAULT_ASPECTS)
         had_script = bool(video.get("script"))
-        script_text = video.get("script") or _generate_script(channel, subject, creds)
+        script_text = video.get("script") or _generate_script(
+            supabase, video_id, channel, subject, creds
+        )
 
         if not had_script and video.get("mode") == "review_script":
             # Canal pediu revisão de roteiro antes de gastar crédito com
@@ -275,17 +378,19 @@ def process_one(supabase, video: dict[str, Any]) -> None:
         update: dict[str, Any] = {"script": script_text}
         duration_seconds: float | None = None
         subtitle_storage_path: str | None = None
+        images_generated = 0
 
         for aspect_label in DEFAULT_ASPECTS:
             if aspect_label not in formats:
                 continue
             result = _generate_video_for_aspect(
-                supabase, channel, subject, script_text, aspect_label, creds
+                supabase, video_id, channel, subject, script_text, aspect_label, creds
             )
             local_path = result["videos"][0]
             storage_path = _upload_result(supabase, owner_id, video_id, aspect_label, local_path)
             update[f"{aspect_label}_path"] = storage_path
             duration_seconds = result.get("audio_duration") or duration_seconds
+            images_generated += len(result.get("materials") or [])
 
             local_subtitle_path = result.get("subtitle_path")
             if subtitle_storage_path is None and local_subtitle_path and os.path.exists(
@@ -303,7 +408,13 @@ def process_one(supabase, video: dict[str, Any]) -> None:
             update["duration_seconds"] = duration_seconds
         if subtitle_storage_path is not None:
             update["subtitle_path"] = subtitle_storage_path
+        if images_generated:
+            update["est_cost_usd"] = _estimate_cost_usd(
+                script_text, images_generated, channel.get("tts_provider") or "edge"
+            )
         update["status"] = "ready"
+        update["progress_stage"] = None
+        update["progress_detail"] = {}
         supabase.table("videos").update(update).eq("id", video_id).execute()
         logger.success(f"vídeo {video_id} pronto")
     except Exception as exc:  # noqa: BLE001 - queremos registrar qualquer falha e seguir para o próximo job

@@ -35,6 +35,7 @@ import {
   Loader2,
   MoreVertical,
   Pencil,
+  RefreshCw,
   Trash2,
   Smartphone,
   MonitorPlay,
@@ -43,6 +44,7 @@ import {
   approveScript,
   approveVideo,
   deleteVideo,
+  regenerateVideo,
   togglePublishedFlag,
   updateVideoTitle,
 } from "@/app/actions";
@@ -198,6 +200,17 @@ export function VideoCard({ video }: { video: VideoWithChannel }) {
     });
   }
 
+  function handleRegenerate() {
+    startTransition(async () => {
+      try {
+        await regenerateVideo(video.id);
+        toast.success("Regerando com o mesmo roteiro — novas imagens e áudio.");
+      } catch {
+        toast.error("Não foi possível regerar o vídeo.");
+      }
+    });
+  }
+
   function handleSaveTitle() {
     startSavingTitle(async () => {
       try {
@@ -211,6 +224,9 @@ export function VideoCard({ video }: { video: VideoWithChannel }) {
 
   const activeUrl = format === "vertical" ? video.verticalUrl : video.horizontalUrl;
   const hasBothFormats = Boolean(video.verticalUrl && video.horizontalUrl);
+  const progressDetail = video.progress_detail as { percent?: number } | null;
+  const progressPercent =
+    typeof progressDetail?.percent === "number" ? Math.round(progressDetail.percent) : null;
 
   return (
     <Card className="overflow-hidden border-border/60 py-0 gap-0">
@@ -321,6 +337,22 @@ export function VideoCard({ video }: { video: VideoWithChannel }) {
           </p>
         ) : null}
 
+        {video.status === "generating" ? (
+          <div className="space-y-1.5">
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin text-amber-400" />
+              {video.progress_stage ?? "Iniciando..."}
+              {progressPercent !== null ? ` (${progressPercent}%)` : ""}
+            </p>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+              <div
+                className="h-full rounded-full bg-amber-400 transition-all"
+                style={{ width: `${progressPercent ?? 5}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
+
         {video.status === "script_ready" ? <ScriptReviewPanel video={video} /> : null}
 
         {video.status === "ready" ? (
@@ -352,6 +384,12 @@ export function VideoCard({ video }: { video: VideoWithChannel }) {
               </a>
             ) : null}
           </div>
+        ) : null}
+
+        {video.status === "ready" && video.est_cost_usd ? (
+          <p className="text-[11px] text-muted-foreground">
+            Custo estimado: ~US$ {video.est_cost_usd.toFixed(2)} (referência aproximada)
+          </p>
         ) : null}
 
         {video.status === "ready" ? (
@@ -447,6 +485,12 @@ export function VideoCard({ video }: { video: VideoWithChannel }) {
             }
           />
           <DropdownMenuContent align="end">
+            {video.status === "ready" || video.status === "failed" ? (
+              <DropdownMenuItem onClick={handleRegenerate} disabled={isPending}>
+                <RefreshCw className="h-4 w-4" />
+                Regerar (mesmo roteiro)
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem
               variant="destructive"
               onClick={handleDelete}
