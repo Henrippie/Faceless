@@ -53,7 +53,15 @@ export function ChannelFormDialog({
   const [form, setForm] = useState(EMPTY_FORM);
   const [vertical, setVertical] = useState(true);
   const [horizontal, setHorizontal] = useState(true);
+  const [platforms, setPlatforms] = useState<string[]>([]);
+  const [madeForKids, setMadeForKids] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  function togglePlatform(platform: string) {
+    setPlatforms((prev) =>
+      prev.includes(platform) ? prev.filter((p) => p !== platform) : [...prev, platform],
+    );
+  }
 
   function update<K extends keyof typeof EMPTY_FORM>(key: K, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -67,9 +75,16 @@ export function ChannelFormDialog({
     ];
     startTransition(async () => {
       try {
-        await createChannel({ ...form, formats });
+        await createChannel({
+          ...form,
+          formats,
+          publishPlatforms: platforms,
+          youtubeMadeForKids: madeForKids,
+        });
         toast.success("Canal criado.");
         setForm(EMPTY_FORM);
+        setPlatforms([]);
+        setMadeForKids(false);
         setOpen(false);
       } catch (error) {
         toast.error(
@@ -236,6 +251,31 @@ export function ChannelFormDialog({
                 <Switch checked={horizontal} onCheckedChange={setHorizontal} />
                 Horizontal (YouTube)
               </label>
+            </div>
+
+            <div className="space-y-2 rounded-lg border border-border/60 p-3">
+              <Label>Publicação automática (após aprovar o vídeo)</Label>
+              <p className="text-xs text-muted-foreground">
+                Precisa da chave do Upload-Post em Configurações. Sem isso,
+                marcar como aprovado só fica registrado, sem publicar.
+              </p>
+              <div className="flex flex-wrap gap-4 pt-1">
+                {["youtube", "tiktok", "instagram"].map((platform) => (
+                  <label key={platform} className="flex items-center gap-2 text-sm capitalize">
+                    <Switch
+                      checked={platforms.includes(platform)}
+                      onCheckedChange={() => togglePlatform(platform)}
+                    />
+                    {platform}
+                  </label>
+                ))}
+              </div>
+              {platforms.includes("youtube") ? (
+                <label className="flex items-center gap-2 pt-1 text-sm">
+                  <Switch checked={madeForKids} onCheckedChange={setMadeForKids} />
+                  Conteúdo feito para crianças (declaração do YouTube)
+                </label>
+              ) : null}
             </div>
           </div>
 

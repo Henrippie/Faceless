@@ -26,6 +26,8 @@ export type Database = {
           llm_provider: string
           owner_id: string
           updated_at: string
+          upload_post_api_key_secret_id: string | null
+          upload_post_username: string
         }
         Insert: {
           elevenlabs_api_key_secret_id?: string | null
@@ -38,6 +40,8 @@ export type Database = {
           llm_provider?: string
           owner_id: string
           updated_at?: string
+          upload_post_api_key_secret_id?: string | null
+          upload_post_username?: string
         }
         Update: {
           elevenlabs_api_key_secret_id?: string | null
@@ -50,12 +54,16 @@ export type Database = {
           llm_provider?: string
           owner_id?: string
           updated_at?: string
+          upload_post_api_key_secret_id?: string | null
+          upload_post_username?: string
         }
         Relationships: []
       }
       channels: {
         Row: {
           avatar_url: string | null
+          bg_music_path: string | null
+          bg_music_volume: number
           created_at: string
           custom_system_prompt: string
           formats: string[]
@@ -65,15 +73,19 @@ export type Database = {
           name: string
           niche: string
           owner_id: string
+          publish_platforms: string[]
           slug: string
           status: string
           tts_provider: string
           updated_at: string
           video_script_prompt: string
           voice_name: string
+          youtube_made_for_kids: boolean
         }
         Insert: {
           avatar_url?: string | null
+          bg_music_path?: string | null
+          bg_music_volume?: number
           created_at?: string
           custom_system_prompt?: string
           formats?: string[]
@@ -83,15 +95,19 @@ export type Database = {
           name: string
           niche?: string
           owner_id?: string
+          publish_platforms?: string[]
           slug: string
           status?: string
           tts_provider?: string
           updated_at?: string
           video_script_prompt?: string
           voice_name?: string
+          youtube_made_for_kids?: boolean
         }
         Update: {
           avatar_url?: string | null
+          bg_music_path?: string | null
+          bg_music_volume?: number
           created_at?: string
           custom_system_prompt?: string
           formats?: string[]
@@ -101,61 +117,99 @@ export type Database = {
           name?: string
           niche?: string
           owner_id?: string
+          publish_platforms?: string[]
           slug?: string
           status?: string
           tts_provider?: string
           updated_at?: string
           video_script_prompt?: string
           voice_name?: string
+          youtube_made_for_kids?: boolean
         }
         Relationships: []
       }
       videos: {
         Row: {
+          approved_at: string | null
           channel_id: string
           created_at: string
           duration_seconds: number | null
           error: string | null
+          est_cost_usd: number | null
           horizontal_path: string | null
           id: string
+          mode: string
           owner_id: string
+          progress_detail: Json
+          progress_stage: string | null
+          publish_error: string | null
+          publish_results: Json
+          publish_state: string
           published: Json
+          scene_preview_paths: Json
+          scheduled_at: string | null
           script: string | null
           status: string
           subject: string
+          subtitle_path: string | null
           thumbnail_path: string | null
+          title: string | null
           updated_at: string
           vertical_path: string | null
         }
         Insert: {
+          approved_at?: string | null
           channel_id: string
           created_at?: string
           duration_seconds?: number | null
           error?: string | null
+          est_cost_usd?: number | null
           horizontal_path?: string | null
           id?: string
+          mode?: string
           owner_id?: string
+          progress_detail?: Json
+          progress_stage?: string | null
+          publish_error?: string | null
+          publish_results?: Json
+          publish_state?: string
           published?: Json
+          scene_preview_paths?: Json
+          scheduled_at?: string | null
           script?: string | null
           status?: string
           subject: string
+          subtitle_path?: string | null
           thumbnail_path?: string | null
+          title?: string | null
           updated_at?: string
           vertical_path?: string | null
         }
         Update: {
+          approved_at?: string | null
           channel_id?: string
           created_at?: string
           duration_seconds?: number | null
           error?: string | null
+          est_cost_usd?: number | null
           horizontal_path?: string | null
           id?: string
+          mode?: string
           owner_id?: string
+          progress_detail?: Json
+          progress_stage?: string | null
+          publish_error?: string | null
+          publish_results?: Json
+          publish_state?: string
           published?: Json
+          scene_preview_paths?: Json
+          scheduled_at?: string | null
           script?: string | null
           status?: string
           subject?: string
+          subtitle_path?: string | null
           thumbnail_path?: string | null
+          title?: string | null
           updated_at?: string
           vertical_path?: string | null
         }
@@ -174,7 +228,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      approve_video: {
+        Args: { p_scheduled_at?: string; p_video_id: string }
+        Returns: undefined
+      }
       get_credentials_for_owner: { Args: { p_owner_id: string }; Returns: Json }
+      get_my_elevenlabs_credential: { Args: never; Returns: Json }
+      get_my_image_credential: { Args: never; Returns: Json }
+      get_my_llm_credential: { Args: never; Returns: Json }
       set_elevenlabs_credential: {
         Args: { p_api_key: string }
         Returns: undefined
@@ -190,6 +251,10 @@ export type Database = {
           p_model: string
           p_provider: string
         }
+        Returns: undefined
+      }
+      set_upload_post_credential: {
+        Args: { p_api_key: string; p_username: string }
         Returns: undefined
       }
     }

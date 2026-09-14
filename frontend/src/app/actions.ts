@@ -6,6 +6,31 @@ import { createClient } from "@/lib/supabase/server";
 
 const MAX_CHANNELS = 100;
 
+const DEFAULT_LLM_BASE_URLS: Record<string, string> = {
+  openai: "https://api.openai.com/v1",
+  moonshot: "https://api.moonshot.cn/v1",
+  deepseek: "https://api.deepseek.com/v1",
+  gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
+};
+
+// Alguns provedores (ex. Kimi/Moonshot com plano de concorrência baixa)
+// devolvem 429 "max organization concurrency" sob uso simultâneo — comum
+// quando o worker está gerando um roteiro e o painel pede uma sugestão ao
+// mesmo tempo. Uma única espera curta e nova tentativa resolve a maioria
+// dos casos sem expor o erro bruto pro usuário.
+async function fetchWithRetry(url: string, init: RequestInit, retries = 2) {
+  let lastResponse: Response | null = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(url, init);
+    if (response.status !== 429) return response;
+    lastResponse = response;
+    if (attempt < retries) {
+      await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+    }
+  }
+  return lastResponse!;
+}
+
 const DIACRITICS_PATTERN = new RegExp("[\\u0300-\\u036f]", "g");
 
 function slugify(text: string) {
@@ -35,6 +60,8 @@ export type CreateChannelInput = {
   customSystemPrompt: string;
   imagePromptTemplate: string;
   formats: string[];
+  publishPlatforms: string[];
+  youtubeMadeForKids: boolean;
 };
 
 export async function createChannel(input: CreateChannelInput) {
@@ -79,11 +106,119 @@ export async function createChannel(input: CreateChannelInput) {
     custom_system_prompt: input.customSystemPrompt,
     image_prompt_template: input.imagePromptTemplate,
     formats: input.formats.length ? input.formats : ["vertical", "horizontal"],
+    publish_platforms: input.publishPlatforms,
+    youtube_made_for_kids: input.youtubeMadeForKids,
   });
 
   if (error) throw new Error(error.message);
   revalidatePath("/channels");
   revalidatePath("/");
+}
+
+export type UpdateChannelInput = {
+  niche: string;
+  language: string;
+  voiceName: string;
+  ttsProvider: string;
+  videoScriptPrompt: string;
+  customSystemPrompt: string;
+  imagePromptTemplate: string;
+  formats: string[];
+};
+
+export async function updateChannel(channelId: string, input: UpdateChannelInput) {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("channels")
+    .update({
+      niche: input.niche,
+      language: input.language,
+      voice_name: input.voiceName,
+      tts_provider: input.ttsProvider,
+      video_script_prompt: input.videoScriptPrompt,
+      custom_system_prompt: input.customSystemPrompt,
+      image_prompt_template: input.imagePromptTemplate,
+      formats: input.formats.length ? input.formats : ["vertical", "horizontal"],
+    })
+    .eq("id", channelId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/canais/${channelId}`);
+  revalidatePath("/channels");
+}
+
+export async function saveChannelBgMusic(channelId: string, formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("não autenticado");
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    throw new Error("selecione um arquivo de áudio.");
+  }
+  if (file.size > 15 * 1024 * 1024) {
+    throw new Error("arquivo muito grande (máx. 15MB).");
+  }
+
+  const ext = file.name.split(".").pop()?.toLowerCase() || "mp3";
+  const path = `${user.id}/channel-assets/${channelId}/bg-music.${ext}`;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+
+  const { error: uploadError } = await supabase.storage
+    .from("videos")
+    .upload(path, bytes, { contentType: file.type || "audio/mpeg", upsert: true });
+  if (uploadError) throw new Error(uploadError.message);
+
+  const { error } = await supabase
+    .from("channels")
+    .update({ bg_music_path: path })
+    .eq("id", channelId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/canais/${channelId}`);
+}
+
+export async function removeChannelBgMusic(channelId: string) {
+  const supabase = await createClient();
+  const { data: channel } = await supabase
+    .from("channels")
+    .select("bg_music_path")
+    .eq("id", channelId)
+    .single();
+  if (channel?.bg_music_path) {
+    await supabase.storage.from("videos").remove([channel.bg_music_path]);
+  }
+  const { error } = await supabase
+    .from("channels")
+    .update({ bg_music_path: null })
+    .eq("id", channelId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/canais/${channelId}`);
+}
+
+export async function updateChannelBgMusicVolume(channelId: string, volume: number) {
+  const supabase = await createClient();
+  const clamped = Math.min(1, Math.max(0, volume));
+  const { error } = await supabase
+    .from("channels")
+    .update({ bg_music_volume: clamped })
+    .eq("id", channelId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/canais/${channelId}`);
+}
+
+export async function updateChannelPublishSettings(
+  channelId: string,
+  platforms: string[],
+  madeForKids: boolean,
+) {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("channels")
+    .update({ publish_platforms: platforms, youtube_made_for_kids: madeForKids })
+    .eq("id", channelId);
+  if (error) throw new Error(error.message);
+  revalidatePath("/channels");
 }
 
 export async function setChannelStatus(channelId: string, status: "active" | "paused") {
@@ -104,7 +239,11 @@ export async function deleteChannel(channelId: string) {
   revalidatePath("/");
 }
 
-export async function queueVideo(channelId: string, subject: string) {
+export async function queueVideo(
+  channelId: string,
+  subject: string,
+  mode: "auto" | "review_script" = "auto",
+) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -116,7 +255,225 @@ export async function queueVideo(channelId: string, subject: string) {
     channel_id: channelId,
     subject,
     status: "queued",
+    mode,
   });
+  if (error) throw new Error(error.message);
+  revalidatePath("/");
+}
+
+export async function suggestVideoTopics(channelId: string): Promise<string[]> {
+  const supabase = await createClient();
+
+  const { data: channel, error: channelError } = await supabase
+    .from("channels")
+    .select("name, niche, language, video_script_prompt, custom_system_prompt")
+    .eq("id", channelId)
+    .single();
+  if (channelError || !channel) throw new Error("canal não encontrado.");
+
+  const { data: creds, error: credError } = await supabase.rpc(
+    "get_my_llm_credential",
+  );
+  if (credError) throw new Error(credError.message);
+
+  const credData = (creds ?? {}) as Record<string, string | null>;
+  const provider = (credData.llm_provider || "").trim();
+  const apiKey = (credData.llm_api_key || "").trim();
+  if (!provider || !apiKey) {
+    throw new Error(
+      "configure sua chave de LLM em Configurações antes de pedir sugestões.",
+    );
+  }
+  const model = (credData.llm_model || "").trim() || "gpt-4o-mini";
+  const baseUrl =
+    (credData.llm_base_url || "").trim() ||
+    DEFAULT_LLM_BASE_URLS[provider] ||
+    DEFAULT_LLM_BASE_URLS.openai;
+
+  const systemPrompt =
+    (channel.custom_system_prompt || "").trim() ||
+    `Você é o roteirista de um canal chamado "${channel.name}" sobre ${channel.niche || "temas diversos"}.`;
+
+  const response = await fetchWithRetry(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content:
+            `Idioma do canal: ${channel.language || "pt-BR"}. Estilo: ${
+              channel.video_script_prompt || "sem preferência específica"
+            }.\n\n` +
+            "Sugira exatamente 5 temas para o próximo vídeo desse canal, bem " +
+            "diferentes entre si. Cada tema deve ser só um título curto (até " +
+            "10 palavras, no máximo ~80 caracteres) — NUNCA o roteiro ou um " +
+            "resumo da história. Responda só com uma lista numerada de 1 a " +
+            "5, uma linha por tema, sem explicações extras.",
+        },
+      ],
+      // Sem temperature explícito: alguns modelos (ex. Kimi K2 Thinking) só
+      // aceitam o valor padrão e rejeitam qualquer override com 400. O motor
+      // Python (app/services/llm.py) também nunca envia esse campo.
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      `falha ao gerar sugestões (${response.status}): ${text.slice(0, 200)}`,
+    );
+  }
+
+  const json = await response.json();
+  const content: string = json?.choices?.[0]?.message?.content ?? "";
+  const MAX_TOPIC_LENGTH = 100;
+  const topics = content
+    .split("\n")
+    .map((line: string) => line.replace(/^\s*[\d.\-*)]+\s*/, "").trim())
+    .filter(Boolean)
+    // Alguns modelos ignoram o limite de tamanho pedido e devolvem um
+    // roteiro inteiro em vez de um título — descarta pra não quebrar o
+    // layout da pílula na tela.
+    .map((topic: string) =>
+      topic.length > MAX_TOPIC_LENGTH ? null : topic,
+    )
+    .filter((topic): topic is string => topic !== null)
+    .slice(0, 5);
+
+  if (topics.length === 0) {
+    throw new Error("o modelo não devolveu sugestões utilizáveis (título muito longo).");
+  }
+  return topics;
+}
+
+export async function testVoiceSample(
+  ttsProvider: string,
+  voiceName: string,
+): Promise<string> {
+  const sampleText =
+    "Olá! Esta é uma amostra da narração deste canal, pra você calibrar o tom antes de gerar um vídeo inteiro.";
+
+  if (ttsProvider !== "elevenlabs") {
+    throw new Error(
+      "teste de voz ao vivo só está disponível pra ElevenLabs por enquanto. " +
+        "O Edge TTS é gratuito e pode ser conferido direto no primeiro vídeo gerado.",
+    );
+  }
+
+  const voiceId = voiceName.replace(/^elevenlabs:/, "").trim();
+  if (!voiceId) {
+    throw new Error("informe o ID da voz da ElevenLabs antes de testar.");
+  }
+
+  const supabase = await createClient();
+  const { data: creds, error } = await supabase.rpc(
+    "get_my_elevenlabs_credential",
+  );
+  if (error) throw new Error(error.message);
+  const apiKey = ((creds ?? {}) as Record<string, string | null>)
+    .elevenlabs_api_key || "";
+  if (!apiKey) {
+    throw new Error(
+      "configure sua chave da ElevenLabs em Configurações antes de testar.",
+    );
+  }
+
+  const response = await fetchWithRetry(
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "xi-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        text: sampleText,
+        model_id: "eleven_multilingual_v2",
+      }),
+    },
+  );
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      `falha ao gerar amostra (${response.status}): ${text.slice(0, 200)}`,
+    );
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return `data:audio/mpeg;base64,${buffer.toString("base64")}`;
+}
+
+export async function testImageStyle(promptTemplate: string): Promise<string> {
+  const supabase = await createClient();
+  const { data: creds, error } = await supabase.rpc("get_my_image_credential");
+  if (error) throw new Error(error.message);
+
+  const credData = (creds ?? {}) as Record<string, string | null>;
+  const baseUrl = (credData.image_base_url || "").trim();
+  const model = (credData.image_model || "").trim();
+  const apiKey = (credData.image_api_key || "").trim();
+  if (!baseUrl || !model) {
+    throw new Error(
+      "configure a geração de imagem em Configurações antes de testar o estilo.",
+    );
+  }
+
+  const term = "a lone figure standing at dawn, wide shot";
+  const trimmedTemplate = promptTemplate.trim();
+  const prompt =
+    trimmedTemplate && trimmedTemplate.includes("{term}")
+      ? trimmedTemplate.replace("{term}", term)
+      : trimmedTemplate || term;
+
+  const response = await fetchWithRetry(`${baseUrl.replace(/\/$/, "")}/images/generations`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
+    body: JSON.stringify({ model, prompt, n: 1, size: "1024x1024" }),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      `falha ao gerar imagem de teste (${response.status}): ${text.slice(0, 300)}`,
+    );
+  }
+  const json = await response.json();
+  const entry = json?.data?.[0];
+  if (entry?.b64_json) {
+    return `data:image/png;base64,${entry.b64_json}`;
+  }
+  if (typeof entry?.url === "string") {
+    return entry.url as string;
+  }
+  throw new Error("resposta da API de imagem não trouxe nem b64_json nem url.");
+}
+
+export async function approveScript(videoId: string, script: string) {
+  const supabase = await createClient();
+  const trimmed = script.trim();
+  if (!trimmed) throw new Error("o roteiro não pode ficar vazio.");
+  const { error } = await supabase
+    .from("videos")
+    .update({ script: trimmed, status: "queued" })
+    .eq("id", videoId)
+    .eq("status", "script_ready");
+  if (error) throw new Error(error.message);
+  revalidatePath("/");
+}
+
+export async function updateVideoTitle(videoId: string, title: string) {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("videos")
+    .update({ title: title.trim() || null })
+    .eq("id", videoId);
   if (error) throw new Error(error.message);
   revalidatePath("/");
 }
@@ -140,6 +497,34 @@ export async function togglePublishedFlag(
 export async function deleteVideo(videoId: string) {
   const supabase = await createClient();
   const { error } = await supabase.from("videos").delete().eq("id", videoId);
+  if (error) throw new Error(error.message);
+  revalidatePath("/");
+}
+
+export async function regenerateVideo(videoId: string) {
+  const supabase = await createClient();
+  // Mantém o roteiro (o worker reaproveita video.script se já existir) e só
+  // limpa mídia/aprovação/publicação — regenera imagem, áudio e vídeo do zero.
+  const { error } = await supabase
+    .from("videos")
+    .update({
+      status: "queued",
+      error: null,
+      vertical_path: null,
+      horizontal_path: null,
+      thumbnail_path: null,
+      subtitle_path: null,
+      duration_seconds: null,
+      est_cost_usd: null,
+      approved_at: null,
+      scheduled_at: null,
+      publish_state: "idle",
+      publish_error: null,
+      publish_results: {},
+      progress_stage: null,
+      progress_detail: {},
+    })
+    .eq("id", videoId);
   if (error) throw new Error(error.message);
   revalidatePath("/");
 }
@@ -183,4 +568,27 @@ export async function saveElevenlabsCredential(apiKey: string) {
   });
   if (error) throw new Error(error.message);
   revalidatePath("/settings");
+}
+
+export async function saveUploadPostCredential(input: {
+  username: string;
+  apiKey: string;
+}) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_upload_post_credential", {
+    p_username: input.username,
+    p_api_key: input.apiKey,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/settings");
+}
+
+export async function approveVideo(videoId: string, scheduledAt?: string | null) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("approve_video", {
+    p_video_id: videoId,
+    p_scheduled_at: scheduledAt ?? undefined,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/");
 }

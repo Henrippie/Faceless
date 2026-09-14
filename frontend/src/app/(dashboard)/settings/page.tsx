@@ -3,6 +3,7 @@ import {
   ElevenlabsCredentialForm,
   ImageCredentialForm,
   LlmCredentialForm,
+  UploadPostCredentialForm,
 } from "@/components/credential-forms";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +40,10 @@ export default async function SettingsPage() {
         />
         <ElevenlabsCredentialForm
           configured={Boolean(credentials?.elevenlabs_api_key_secret_id)}
+        />
+        <UploadPostCredentialForm
+          initialUsername={credentials?.upload_post_username ?? ""}
+          configured={Boolean(credentials?.upload_post_api_key_secret_id)}
         />
       </div>
     </div>

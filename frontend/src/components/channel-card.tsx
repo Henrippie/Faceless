@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useTransition } from "react";
 import {
   Card,
@@ -10,7 +11,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Pause, Play, Trash2 } from "lucide-react";
+import { ArrowRight, Pause, Play, Trash2 } from "lucide-react";
 import { deleteChannel, setChannelStatus } from "@/app/actions";
 import type { Channel } from "@/lib/types";
 import { toast } from "sonner";
@@ -67,33 +68,41 @@ export function ChannelCard({ channel }: { channel: Channel }) {
         </p>
         <p>Formatos: {channel.formats.join(", ") || "vertical, horizontal"}</p>
       </CardContent>
-      <CardFooter className="justify-end gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleToggleStatus}
-          disabled={isPending}
-          className="gap-1.5"
-        >
-          {isActive ? (
-            <>
-              <Pause className="h-3.5 w-3.5" /> Pausar
-            </>
-          ) : (
-            <>
-              <Play className="h-3.5 w-3.5" /> Ativar
-            </>
-          )}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 text-destructive hover:text-destructive"
-          onClick={handleDelete}
-          disabled={isPending}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
+      <CardFooter className="justify-between gap-2">
+        <Link href={`/canais/${channel.id}`}>
+          <Button variant="secondary" size="sm" className="gap-1.5">
+            Abrir canal
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
+        </Link>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleToggleStatus}
+            disabled={isPending}
+            className="gap-1.5"
+          >
+            {isActive ? (
+              <>
+                <Pause className="h-3.5 w-3.5" /> Pausar
+              </>
+            ) : (
+              <>
+                <Play className="h-3.5 w-3.5" /> Ativar
+              </>
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-destructive hover:text-destructive"
+            onClick={handleDelete}
+            disabled={isPending}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
       </CardFooter>
     </Card>
   );

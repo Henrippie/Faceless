@@ -7,7 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2 } from "lucide-react";
-import { saveElevenlabsCredential, saveImageCredential, saveLlmCredential } from "@/app/actions";
+import {
+  saveElevenlabsCredential,
+  saveImageCredential,
+  saveLlmCredential,
+  saveUploadPostCredential,
+} from "@/app/actions";
 import { toast } from "sonner";
 
 function ConfiguredBadge({ configured }: { configured: boolean }) {
@@ -236,6 +241,74 @@ export function ElevenlabsCredentialForm({ configured }: { configured: boolean }
             <Label htmlFor="elevenlabs-key">Chave de API</Label>
             <Input
               id="elevenlabs-key"
+              type="password"
+              placeholder={configured ? "•••••••••••• (deixe em branco pra manter)" : "..."}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <Button type="submit" size="sm" disabled={isPending}>
+            {isPending ? "Salvando..." : "Salvar"}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function UploadPostCredentialForm({
+  initialUsername,
+  configured,
+}: {
+  initialUsername: string;
+  configured: boolean;
+}) {
+  const [username, setUsername] = useState(initialUsername);
+  const [apiKey, setApiKey] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    startTransition(async () => {
+      try {
+        await saveUploadPostCredential({ username, apiKey });
+        setApiKey("");
+        toast.success("Chave do Upload-Post salva.");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Falha ao salvar.");
+      }
+    });
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base">Publicação automática (Upload-Post)</CardTitle>
+          <ConfiguredBadge configured={configured} />
+        </div>
+        <CardDescription>
+          Usado quando você aprova um vídeo com plataformas configuradas no
+          canal. Crie a conta e conecte YouTube/TikTok/Instagram em{" "}
+          <code className="text-xs">upload-post.com</code>.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="upload-post-username">Usuário (Upload-Post)</Label>
+            <Input
+              id="upload-post-username"
+              placeholder="seu-usuario"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="upload-post-key">Chave de API</Label>
+            <Input
+              id="upload-post-key"
               type="password"
               placeholder={configured ? "•••••••••••• (deixe em branco pra manter)" : "..."}
               value={apiKey}

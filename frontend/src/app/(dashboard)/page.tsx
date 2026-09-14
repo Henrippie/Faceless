@@ -4,9 +4,11 @@ import { getSignedVideoUrl } from "@/lib/storage";
 import { ImageStreamHero } from "@/components/ui/image-stream-hero";
 import { GenerateVideoDialog } from "@/components/generate-video-dialog";
 import { VideoGallery } from "@/components/video-gallery";
+import { VideoCard } from "@/components/video-card";
 import { Button } from "@/components/ui/button";
 import { placeholderStreamImages } from "@/lib/placeholder-gradients";
 import type { VideoWithChannel } from "@/lib/types";
+import { CheckCircle2 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +22,7 @@ export default async function DashboardPage() {
       .order("created_at", { ascending: true }),
     supabase
       .from("videos")
-      .select("*, channel:channels(id, name, slug, niche)")
+      .select("*, channel:channels(id, name, slug, niche, publish_platforms)")
       .order("created_at", { ascending: false })
       .limit(100),
   ]);
@@ -31,6 +33,7 @@ export default async function DashboardPage() {
       verticalUrl: await getSignedVideoUrl(video.vertical_path),
       horizontalUrl: await getSignedVideoUrl(video.horizontal_path),
       thumbnailUrl: await getSignedVideoUrl(video.thumbnail_path),
+      subtitleUrl: await getSignedVideoUrl(video.subtitle_path),
     })),
   );
 
@@ -45,8 +48,11 @@ export default async function DashboardPage() {
   const activeChannels = (channels ?? []).filter((c) => c.status === "active");
   const readyCount = videosWithUrls.filter((v) => v.status === "ready").length;
   const generatingCount = videosWithUrls.filter(
-    (v) => v.status === "queued" || v.status === "generating",
+    (v) => v.status === "queued" || v.status === "generating" || v.status === "script_ready",
   ).length;
+  const awaitingApproval = videosWithUrls.filter(
+    (v) => v.status === "ready" && !v.approved_at,
+  );
 
   return (
     <div className="space-y-8">
@@ -67,8 +73,24 @@ export default async function DashboardPage() {
         </div>
       </ImageStreamHero>
 
+      {awaitingApproval.length > 0 ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-amber-400" />
+            <h2 className="text-lg font-medium">
+              Precisa de aprovação ({awaitingApproval.length})
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {awaitingApproval.map((video) => (
+              <VideoCard key={video.id} video={video} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-medium">Vídeos gerados</h2>
+        <h2 className="text-lg font-medium">Todos os vídeos</h2>
         {channels && channels.length > 0 ? (
           <GenerateVideoDialog channels={activeChannels} />
         ) : (
