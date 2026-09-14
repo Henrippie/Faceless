@@ -35,6 +35,8 @@ export type CreateChannelInput = {
   customSystemPrompt: string;
   imagePromptTemplate: string;
   formats: string[];
+  publishPlatforms: string[];
+  youtubeMadeForKids: boolean;
 };
 
 export async function createChannel(input: CreateChannelInput) {
@@ -79,11 +81,27 @@ export async function createChannel(input: CreateChannelInput) {
     custom_system_prompt: input.customSystemPrompt,
     image_prompt_template: input.imagePromptTemplate,
     formats: input.formats.length ? input.formats : ["vertical", "horizontal"],
+    publish_platforms: input.publishPlatforms,
+    youtube_made_for_kids: input.youtubeMadeForKids,
   });
 
   if (error) throw new Error(error.message);
   revalidatePath("/channels");
   revalidatePath("/");
+}
+
+export async function updateChannelPublishSettings(
+  channelId: string,
+  platforms: string[],
+  madeForKids: boolean,
+) {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("channels")
+    .update({ publish_platforms: platforms, youtube_made_for_kids: madeForKids })
+    .eq("id", channelId);
+  if (error) throw new Error(error.message);
+  revalidatePath("/channels");
 }
 
 export async function setChannelStatus(channelId: string, status: "active" | "paused") {
@@ -183,4 +201,26 @@ export async function saveElevenlabsCredential(apiKey: string) {
   });
   if (error) throw new Error(error.message);
   revalidatePath("/settings");
+}
+
+export async function saveUploadPostCredential(input: {
+  username: string;
+  apiKey: string;
+}) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_upload_post_credential", {
+    p_username: input.username,
+    p_api_key: input.apiKey,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/settings");
+}
+
+export async function approveVideo(videoId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("approve_video", {
+    p_video_id: videoId,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/");
 }

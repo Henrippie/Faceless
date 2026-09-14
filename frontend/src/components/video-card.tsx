@@ -16,15 +16,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  CheckCircle2,
   Download,
+  ExternalLink,
   Loader2,
   MoreVertical,
   Trash2,
   Smartphone,
   MonitorPlay,
 } from "lucide-react";
-import { deleteVideo, togglePublishedFlag } from "@/app/actions";
-import { PUBLISH_PLATFORMS, STATUS_LABELS, type VideoWithChannel } from "@/lib/types";
+import { approveVideo, deleteVideo, togglePublishedFlag } from "@/app/actions";
+import {
+  PUBLISH_PLATFORMS,
+  PUBLISH_STATE_LABELS,
+  STATUS_LABELS,
+  type VideoWithChannel,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -37,9 +44,26 @@ const STATUS_STYLES: Record<string, string> = {
 
 export function VideoCard({ video }: { video: VideoWithChannel }) {
   const [isPending, startTransition] = useTransition();
+  const [approving, setApproving] = useState(false);
   const [published, setPublished] = useState(
     (video.published as Record<string, boolean>) ?? {},
   );
+
+  function handleApprove() {
+    setApproving(true);
+    startTransition(async () => {
+      try {
+        await approveVideo(video.id);
+        toast.success(
+          video.publish_state === "idle" ? "Vídeo aprovado." : "Vídeo aprovado e na fila de publicação.",
+        );
+      } catch {
+        toast.error("Não foi possível aprovar o vídeo.");
+      } finally {
+        setApproving(false);
+      }
+    });
+  }
 
   function handleTogglePublish(platform: string) {
     const next = !published[platform];
@@ -132,6 +156,67 @@ export function VideoCard({ video }: { video: VideoWithChannel }) {
                 </Button>
               </a>
             ) : null}
+          </div>
+        ) : null}
+
+        {video.status === "ready" ? (
+          <div className="flex items-center gap-2">
+            {!video.approved_at ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={handleApprove}
+                disabled={isPending || approving}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {approving ? "Aprovando..." : "Aprovar e publicar"}
+              </Button>
+            ) : (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "gap-1",
+                  video.publish_state === "done" &&
+                    "border-emerald-500/30 bg-emerald-500/15 text-emerald-400",
+                  video.publish_state === "failed" &&
+                    "border-destructive/30 bg-destructive/15 text-destructive",
+                  video.publish_state === "publishing" &&
+                    "border-amber-500/30 bg-amber-500/15 text-amber-400",
+                )}
+              >
+                {video.publish_state === "publishing" ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : null}
+                {PUBLISH_STATE_LABELS[video.publish_state] ?? video.publish_state}
+              </Badge>
+            )}
+          </div>
+        ) : null}
+
+        {video.status === "ready" && video.publish_state === "failed" && video.publish_error ? (
+          <p className="line-clamp-2 text-xs text-destructive">{video.publish_error}</p>
+        ) : null}
+
+        {video.status === "ready" &&
+        video.publish_state === "done" &&
+        video.publish_results &&
+        typeof video.publish_results === "object" ? (
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(video.publish_results as Record<string, { url?: string }>).map(
+              ([platform, result]) =>
+                result?.url ? (
+                  <a
+                    key={platform}
+                    href={result.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1 text-xs text-amber-400 hover:underline"
+                  >
+                    {platform} <ExternalLink className="h-3 w-3" />
+                  </a>
+                ) : null,
+            )}
           </div>
         ) : null}
 

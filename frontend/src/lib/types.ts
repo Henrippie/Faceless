@@ -23,3 +23,11 @@ export const STATUS_LABELS: Record<string, string> = {
   ready: "Pronto",
   failed: "Falhou",
 };
+
+export const PUBLISH_STATE_LABELS: Record<string, string> = {
+  idle: "Não aprovado",
+  queued: "Publicação na fila",
+  publishing: "Publicando",
+  done: "Publicado",
+  failed: "Falha ao publicar",
+};

@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -259,6 +260,111 @@ def process_one(supabase, video: dict[str, Any]) -> None:
         supabase.table("videos").update(
             {"status": "failed", "error": str(exc)}
         ).eq("id", video_id).execute()
+
+
+def _fetch_next_approved_video(supabase) -> dict[str, Any] | None:
+    """Vídeo aprovado no painel (approve_video RPC) com plataformas
+    configuradas no canal — publish_state só vira 'queued' quando há pelo
+    menos uma plataforma marcada, então autopublish nunca dispara sem o
+    dono ter aprovado explicitamente."""
+    response = (
+        supabase.table("videos")
+        .select("*")
+        .eq("publish_state", "queued")
+        .order("approved_at", desc=False)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    return rows[0] if rows else None
+
+
+def _apply_upload_post_credentials(creds: dict[str, Any]) -> None:
+    from app.config import config
+
+    username = (creds.get("upload_post_username") or "").strip()
+    api_key = (creds.get("upload_post_api_key") or "").strip()
+    if not username or not api_key:
+        raise RuntimeError(
+            "Upload-Post não configurado. Adicione usuário e chave em /settings "
+            "antes de aprovar vídeos com publicação automática."
+        )
+    config.app["upload_post_enabled"] = True
+    config.app["upload_post_username"] = username
+    config.app["upload_post_api_key"] = api_key
+
+
+def _download_storage_file(supabase, storage_path: str, suffix: str) -> str:
+    data = supabase.storage.from_(STORAGE_BUCKET).download(storage_path)
+    fd, local_path = tempfile.mkstemp(suffix=suffix)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
+    return local_path
+
+
+def _publish_video(supabase, video: dict[str, Any]) -> None:
+    from app.services.upload_post import upload_post_service
+
+    video_id = video["id"]
+    owner_id = video["owner_id"]
+    storage_path = video.get("vertical_path") or video.get("horizontal_path")
+    if not storage_path:
+        supabase.table("videos").update(
+            {"publish_state": "failed", "publish_error": "vídeo sem arquivo pronto para publicar."}
+        ).eq("id", video_id).execute()
+        return
+
+    channel = _fetch_channel(supabase, video["channel_id"])
+    platforms = channel.get("publish_platforms") or []
+    if not platforms:
+        supabase.table("videos").update({"publish_state": "idle"}).eq("id", video_id).execute()
+        return
+
+    logger.info(f"publicando vídeo {video_id} em {', '.join(platforms)}")
+    supabase.table("videos").update(
+        {"publish_state": "publishing", "publish_error": None}
+    ).eq("id", video_id).execute()
+
+    local_path: str | None = None
+    try:
+        creds = _fetch_credentials(supabase, owner_id)
+        _apply_upload_post_credentials(creds)
+
+        local_path = _download_storage_file(supabase, storage_path, ".mp4")
+
+        youtube_extra = None
+        if any(platform.startswith("youtube") for platform in platforms):
+            youtube_extra = {
+                "selfDeclaredMadeForKids": bool(channel.get("youtube_made_for_kids"))
+            }
+
+        result = upload_post_service.upload_video(
+            local_path,
+            title=video.get("subject") or "",
+            platforms=platforms,
+            youtube_extra=youtube_extra,
+        )
+        if not result.get("success"):
+            raise RuntimeError(
+                result.get("error") or result.get("message") or "falha ao publicar no Upload-Post"
+            )
+
+        publish_results = {platform: result for platform in platforms}
+        supabase.table("videos").update(
+            {"publish_state": "done", "publish_results": publish_results, "publish_error": None}
+        ).eq("id", video_id).execute()
+        logger.success(f"vídeo {video_id} publicado em {', '.join(platforms)}")
+    except Exception as exc:  # noqa: BLE001 - registra a falha e segue para o próximo job
+        logger.exception(f"falha ao publicar vídeo {video_id}: {exc}")
+        supabase.table("videos").update(
+            {"publish_state": "failed", "publish_error": str(exc)}
+        ).eq("id", video_id).execute()
+    finally:
+        if local_path:
+            try:
+                os.remove(local_path)
+            except OSError:
+                pass
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import {
   Card,
   CardContent,
@@ -10,14 +10,42 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Pause, Play, Trash2 } from "lucide-react";
-import { deleteChannel, setChannelStatus } from "@/app/actions";
+import {
+  deleteChannel,
+  setChannelStatus,
+  updateChannelPublishSettings,
+} from "@/app/actions";
 import type { Channel } from "@/lib/types";
 import { toast } from "sonner";
 
+const PUBLISH_PLATFORM_OPTIONS = ["youtube", "tiktok", "instagram"];
+
 export function ChannelCard({ channel }: { channel: Channel }) {
   const [isPending, startTransition] = useTransition();
+  const [platforms, setPlatforms] = useState<string[]>(channel.publish_platforms ?? []);
+  const [madeForKids, setMadeForKids] = useState(channel.youtube_made_for_kids ?? false);
   const isActive = channel.status === "active";
+
+  function savePublishSettings(nextPlatforms: string[], nextMadeForKids: boolean) {
+    setPlatforms(nextPlatforms);
+    setMadeForKids(nextMadeForKids);
+    startTransition(async () => {
+      try {
+        await updateChannelPublishSettings(channel.id, nextPlatforms, nextMadeForKids);
+      } catch {
+        toast.error("Não foi possível salvar a publicação automática.");
+      }
+    });
+  }
+
+  function togglePlatform(platform: string) {
+    const next = platforms.includes(platform)
+      ? platforms.filter((p) => p !== platform)
+      : [...platforms, platform];
+    savePublishSettings(next, madeForKids);
+  }
 
   function handleToggleStatus() {
     startTransition(async () => {
@@ -66,6 +94,31 @@ export function ChannelCard({ channel }: { channel: Channel }) {
           {channel.voice_name || "padrão"}
         </p>
         <p>Formatos: {channel.formats.join(", ") || "vertical, horizontal"}</p>
+      </CardContent>
+      <CardContent className="space-y-2 border-t border-border/60 pt-3">
+        <p className="text-xs font-medium text-foreground">Publicação automática</p>
+        <div className="flex flex-wrap gap-3">
+          {PUBLISH_PLATFORM_OPTIONS.map((platform) => (
+            <label key={platform} className="flex items-center gap-1.5 text-xs capitalize">
+              <Switch
+                checked={platforms.includes(platform)}
+                onCheckedChange={() => togglePlatform(platform)}
+                disabled={isPending}
+              />
+              {platform}
+            </label>
+          ))}
+        </div>
+        {platforms.includes("youtube") ? (
+          <label className="flex items-center gap-1.5 text-xs">
+            <Switch
+              checked={madeForKids}
+              onCheckedChange={(checked) => savePublishSettings(platforms, checked)}
+              disabled={isPending}
+            />
+            Feito para crianças (YouTube)
+          </label>
+        ) : null}
       </CardContent>
       <CardFooter className="justify-end gap-2">
         <Button
