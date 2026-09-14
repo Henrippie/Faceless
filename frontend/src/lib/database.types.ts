@@ -62,6 +62,8 @@ export type Database = {
       channels: {
         Row: {
           avatar_url: string | null
+          bg_music_path: string | null
+          bg_music_volume: number
           created_at: string
           custom_system_prompt: string
           formats: string[]
@@ -82,6 +84,8 @@ export type Database = {
         }
         Insert: {
           avatar_url?: string | null
+          bg_music_path?: string | null
+          bg_music_volume?: number
           created_at?: string
           custom_system_prompt?: string
           formats?: string[]
@@ -102,6 +106,8 @@ export type Database = {
         }
         Update: {
           avatar_url?: string | null
+          bg_music_path?: string | null
+          bg_music_volume?: number
           created_at?: string
           custom_system_prompt?: string
           formats?: string[]
@@ -129,17 +135,25 @@ export type Database = {
           created_at: string
           duration_seconds: number | null
           error: string | null
+          est_cost_usd: number | null
           horizontal_path: string | null
           id: string
+          mode: string
           owner_id: string
+          progress_detail: Json
+          progress_stage: string | null
           publish_error: string | null
           publish_results: Json
           publish_state: string
           published: Json
+          scene_preview_paths: Json
+          scheduled_at: string | null
           script: string | null
           status: string
           subject: string
+          subtitle_path: string | null
           thumbnail_path: string | null
+          title: string | null
           updated_at: string
           vertical_path: string | null
         }
@@ -149,17 +163,25 @@ export type Database = {
           created_at?: string
           duration_seconds?: number | null
           error?: string | null
+          est_cost_usd?: number | null
           horizontal_path?: string | null
           id?: string
+          mode?: string
           owner_id?: string
+          progress_detail?: Json
+          progress_stage?: string | null
           publish_error?: string | null
           publish_results?: Json
           publish_state?: string
           published?: Json
+          scene_preview_paths?: Json
+          scheduled_at?: string | null
           script?: string | null
           status?: string
           subject: string
+          subtitle_path?: string | null
           thumbnail_path?: string | null
+          title?: string | null
           updated_at?: string
           vertical_path?: string | null
         }
@@ -169,17 +191,25 @@ export type Database = {
           created_at?: string
           duration_seconds?: number | null
           error?: string | null
+          est_cost_usd?: number | null
           horizontal_path?: string | null
           id?: string
+          mode?: string
           owner_id?: string
+          progress_detail?: Json
+          progress_stage?: string | null
           publish_error?: string | null
           publish_results?: Json
           publish_state?: string
           published?: Json
+          scene_preview_paths?: Json
+          scheduled_at?: string | null
           script?: string | null
           status?: string
           subject?: string
+          subtitle_path?: string | null
           thumbnail_path?: string | null
+          title?: string | null
           updated_at?: string
           vertical_path?: string | null
         }
@@ -198,8 +228,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      approve_video: { Args: { p_video_id: string }; Returns: undefined }
+      approve_video: {
+        Args: { p_scheduled_at?: string; p_video_id: string }
+        Returns: undefined
+      }
       get_credentials_for_owner: { Args: { p_owner_id: string }; Returns: Json }
+      get_my_elevenlabs_credential: { Args: never; Returns: Json }
+      get_my_image_credential: { Args: never; Returns: Json }
+      get_my_llm_credential: { Args: never; Returns: Json }
       set_elevenlabs_credential: {
         Args: { p_api_key: string }
         Returns: undefined

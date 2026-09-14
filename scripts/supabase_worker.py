@@ -31,6 +31,7 @@ import os
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -168,6 +169,7 @@ def _generate_script(channel: dict[str, Any], subject: str, creds: dict[str, Any
 
 
 def _generate_video_for_aspect(
+    supabase,
     channel: dict[str, Any],
     subject: str,
     script_text: str,
@@ -192,21 +194,43 @@ def _generate_video_for_aspect(
     if image_prompt_template:
         config.app["openai_image_prompt_template"] = image_prompt_template
 
-    params = VideoParams(
-        video_subject=subject,
-        video_script=script_text,
-        video_language=channel.get("language") or "",
-        voice_name=voice_name,
-        video_aspect=ASPECT_RATIOS[aspect_label],
-        video_source="openai_image",
-    )
-    task_id = utils.get_uuid()
-    result = tm.start(task_id=task_id, params=params, stop_at="video")
-    if not result or not result.get("videos"):
-        raise RuntimeError(
-            f"falha ao gerar vídeo {aspect_label} (task_id={task_id}): {result}"
+    bgm_kwargs: dict[str, Any] = {}
+    bgm_local_path: str | None = None
+    bg_music_path = (channel.get("bg_music_path") or "").strip()
+    if bg_music_path:
+        # Trilha sonora padrão do canal, definida em /canais/<id> (aba
+        # Configurações). Sem isso, mantém o comportamento padrão do MPT
+        # (bgm_type="random" dos VideoParams) pra não mudar vídeos existentes.
+        bgm_local_path = _download_storage_file(supabase, bg_music_path, ".audio")
+        bgm_kwargs = {
+            "bgm_type": "custom",
+            "bgm_file": bgm_local_path,
+            "bgm_volume": float(channel.get("bg_music_volume") or 0.12),
+        }
+
+    try:
+        params = VideoParams(
+            video_subject=subject,
+            video_script=script_text,
+            video_language=channel.get("language") or "",
+            voice_name=voice_name,
+            video_aspect=ASPECT_RATIOS[aspect_label],
+            video_source="openai_image",
+            **bgm_kwargs,
         )
-    return result
+        task_id = utils.get_uuid()
+        result = tm.start(task_id=task_id, params=params, stop_at="video")
+        if not result or not result.get("videos"):
+            raise RuntimeError(
+                f"falha ao gerar vídeo {aspect_label} (task_id={task_id}): {result}"
+            )
+        return result
+    finally:
+        if bgm_local_path:
+            try:
+                os.remove(bgm_local_path)
+            except OSError:
+                pass
 
 
 def _upload_result(supabase, owner_id: str, video_id: str, aspect_label: str, local_path: str) -> str:
@@ -234,24 +258,51 @@ def process_one(supabase, video: dict[str, Any]) -> None:
         channel = _fetch_channel(supabase, video["channel_id"])
         creds = _fetch_credentials(supabase, owner_id)
         formats = channel.get("formats") or list(DEFAULT_ASPECTS)
+        had_script = bool(video.get("script"))
         script_text = video.get("script") or _generate_script(channel, subject, creds)
+
+        if not had_script and video.get("mode") == "review_script":
+            # Canal pediu revisão de roteiro antes de gastar crédito com
+            # imagem/áudio: para aqui e espera a aprovação em /canais/<id>
+            # (approveScript volta o status pra "queued" com o roteiro já
+            # salvo, e o próximo process_one pula direto pra geração de mídia).
+            supabase.table("videos").update(
+                {"script": script_text, "status": "script_ready"}
+            ).eq("id", video_id).execute()
+            logger.info(f"vídeo {video_id} aguardando aprovação do roteiro")
+            return
 
         update: dict[str, Any] = {"script": script_text}
         duration_seconds: float | None = None
+        subtitle_storage_path: str | None = None
 
         for aspect_label in DEFAULT_ASPECTS:
             if aspect_label not in formats:
                 continue
             result = _generate_video_for_aspect(
-                channel, subject, script_text, aspect_label, creds
+                supabase, channel, subject, script_text, aspect_label, creds
             )
             local_path = result["videos"][0]
             storage_path = _upload_result(supabase, owner_id, video_id, aspect_label, local_path)
             update[f"{aspect_label}_path"] = storage_path
             duration_seconds = result.get("audio_duration") or duration_seconds
 
+            local_subtitle_path = result.get("subtitle_path")
+            if subtitle_storage_path is None and local_subtitle_path and os.path.exists(
+                local_subtitle_path
+            ):
+                subtitle_storage_path = f"{owner_id}/{video_id}/subtitle.srt"
+                with open(local_subtitle_path, "rb") as fh:
+                    supabase.storage.from_(STORAGE_BUCKET).upload(
+                        subtitle_storage_path,
+                        fh.read(),
+                        {"content-type": "text/plain", "upsert": "true"},
+                    )
+
         if duration_seconds is not None:
             update["duration_seconds"] = duration_seconds
+        if subtitle_storage_path is not None:
+            update["subtitle_path"] = subtitle_storage_path
         update["status"] = "ready"
         supabase.table("videos").update(update).eq("id", video_id).execute()
         logger.success(f"vídeo {video_id} pronto")
@@ -266,11 +317,14 @@ def _fetch_next_approved_video(supabase) -> dict[str, Any] | None:
     """Vídeo aprovado no painel (approve_video RPC) com plataformas
     configuradas no canal — publish_state só vira 'queued' quando há pelo
     menos uma plataforma marcada, então autopublish nunca dispara sem o
-    dono ter aprovado explicitamente."""
+    dono ter aprovado explicitamente. scheduled_at (opcional, definido no
+    popup de aprovação) segura a publicação até a data escolhida."""
+    now = datetime.now(timezone.utc).isoformat()
     response = (
         supabase.table("videos")
         .select("*")
         .eq("publish_state", "queued")
+        .or_(f"scheduled_at.is.null,scheduled_at.lte.{now}")
         .order("approved_at", desc=False)
         .limit(1)
         .execute()
