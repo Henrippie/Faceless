@@ -1,13 +1,20 @@
 <div align="center">
 
-# Canal Dark de Histórias Bíblicas
+# Central de Canais Dark
 
-### Pipeline automatizado para gerar vídeos "faceless" de histórias da Bíblia
+### Motor + painel para tocar vários canais "faceless" ao mesmo tempo — o primeiro é de histórias bíblicas
 
-Este projeto é um fork do [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTurbo)
-(MIT License, © Harry), adaptado e pré-configurado para produzir vídeos curtos
-(Shorts/Reels/TikTok) narrando histórias bíblicas em português, com estética
-sombria/cinematográfica ("dark channel"), sem aparecer rosto algum.
+Este projeto tem três partes: o **motor de geração de vídeo** (fork do
+[MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTurbo), MIT
+License, © Harry), um **painel web** (`frontend/`) onde você cadastra até
+100 canais e acompanha os vídeos gerados por todos eles em um só lugar, e um
+**worker** (`scripts/supabase_worker.py`) que liga as duas pontas: consome a
+fila de vídeos pedidos no painel e roda o motor para produzi-los.
+
+O primeiro canal configurado é de histórias bíblicas em português, com
+estética sombria/cinematográfica ("dark channel"), sem aparecer rosto algum
+— mas nada no motor é específico da Bíblia; qualquer nicho vira só mais um
+canal no painel.
 
 [Documentação original em inglês](README-en.md) · [中文](README-zh.md) · [日本語](README-ja.md)
 
@@ -15,7 +22,33 @@ sombria/cinematográfica ("dark channel"), sem aparecer rosto algum.
 
 ---
 
-## O que este fork adiciona
+## Arquitetura
+
+```
+        painel (frontend/, Next.js na Vercel)
+        cadastra canais, pede vídeos, mostra a "mesa" de resultados
+                          │
+                          ▼
+        Supabase (Postgres + Storage)
+        tabelas channels/videos = fila e catálogo de vídeos
+                          │
+                          ▼
+        worker (scripts/supabase_worker.py)
+        consome a fila, roda o motor abaixo, sobe o .mp4 pronto
+                          │
+                          ▼
+        motor MoneyPrinterTurbo (este repositório, raiz)
+        roteiro (LLM) → narração (TTS) → imagens de IA → montagem (ffmpeg)
+```
+
+- **Painel**: veja [`frontend/README.md`](frontend/README.md) para rodar e
+  fazer deploy.
+- **Worker**: veja a seção [Worker da fila (Supabase)](#worker-da-fila-supabase)
+  abaixo.
+- **Motor**: o resto deste README — pode ser usado sozinho, sem painel nem
+  Supabase, via WebUI/CLI/scripts, exatamente como um fork "de canal único".
+
+## O que este fork adiciona ao MoneyPrinterTurbo
 
 O MoneyPrinterTurbo original é uma ferramenta genérica: você dá um tema, ele
 gera roteiro (LLM), narração (TTS), busca/gera imagens ou vídeos, legenda e
@@ -128,6 +161,29 @@ etc.) exceto `--video-aspect`, `--stop-at`, `--batch-file` e `--task-id`, que
 o script controla para gerar as duas versões. Use `--slug` para nomear a
 pasta de saída manualmente. Veja `uv run python scripts/gerar_dois_formatos.py --help`
 para todas as opções.
+
+## Worker da fila (Supabase)
+
+Se você está usando o [painel](frontend/README.md) para cadastrar canais e
+pedir vídeos, é o worker que efetivamente os gera. Ele fica em loop, olhando
+a tabela `videos` no Supabase por linhas com `status = "queued"`.
+
+```bash
+export SUPABASE_URL="https://xxxx.supabase.co"
+export SUPABASE_SERVICE_ROLE_KEY="..."   # Project Settings → API no painel do Supabase
+uv run python scripts/supabase_worker.py
+```
+
+Para cada vídeo pedido: gera o roteiro uma vez (usando o `video_script_prompt`
+e `custom_system_prompt` salvos no canal), depois monta a versão vertical
+e/ou horizontal conforme os `formats` do canal, sobe os `.mp4` prontos para o
+bucket `videos` do Storage e atualiza o status da linha para `ready` (ou
+`failed`, com o erro, se algo quebrar). Roda um vídeo por vez — a chave
+service_role é secreta, nunca a exponha no painel nem a comite.
+
+`--once` processa um único vídeo da fila e encerra (bom para rodar via cron);
+`--interval SEGUNDOS` ajusta o intervalo entre verificações da fila vazia
+(padrão 15s).
 
 ## Publicação automática
 
