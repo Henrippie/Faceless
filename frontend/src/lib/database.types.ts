@@ -66,6 +66,7 @@ export type Database = {
           bg_music_volume: number
           created_at: string
           custom_system_prompt: string
+          daily_video_target: number
           formats: string[]
           id: string
           image_prompt_template: string
@@ -88,6 +89,7 @@ export type Database = {
           bg_music_volume?: number
           created_at?: string
           custom_system_prompt?: string
+          daily_video_target?: number
           formats?: string[]
           id?: string
           image_prompt_template?: string
@@ -110,6 +112,7 @@ export type Database = {
           bg_music_volume?: number
           created_at?: string
           custom_system_prompt?: string
+          daily_video_target?: number
           formats?: string[]
           id?: string
           image_prompt_template?: string

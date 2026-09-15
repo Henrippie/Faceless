@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -170,6 +171,103 @@ def _apply_llm_credentials(creds: dict[str, Any]) -> None:
         config.app[f"{provider}_model_name"] = model
     if base_url:
         config.app[f"{provider}_base_url"] = base_url
+
+
+MAX_TOPIC_LENGTH = 100
+
+
+def _suggest_topics(channel: dict[str, Any], creds: dict[str, Any], count: int) -> list[str]:
+    """Pede ao LLM já configurado do canal `count` temas curtos e novos,
+    usando o mesmo caminho de baixo nível que a geração de roteiro (sem
+    fixar temperature — alguns modelos, como Kimi K2 Thinking, rejeitam
+    qualquer valor diferente do padrão com HTTP 400)."""
+    from app.services import llm
+
+    _apply_llm_credentials(creds)
+
+    system_prompt = (channel.get("custom_system_prompt") or "").strip() or (
+        f"Você é o roteirista do canal \"{channel.get('name')}\" sobre "
+        f"{channel.get('niche') or 'temas diversos'}."
+    )
+    prompt = (
+        f"{system_prompt}\n\n"
+        f"Idioma do canal: {channel.get('language') or 'pt-BR'}. Estilo: "
+        f"{channel.get('video_script_prompt') or 'sem preferência específica'}.\n\n"
+        f"Sugira exatamente {count} temas para o próximo vídeo desse canal, "
+        "bem diferentes entre si. Cada tema deve ser só um título curto (até "
+        "10 palavras, no máximo ~80 caracteres) — NUNCA o roteiro ou um "
+        "resumo da história. Responda só com uma lista numerada, uma linha "
+        "por tema, sem explicações extras."
+    )
+    response = llm._generate_response(prompt=prompt)
+    topics: list[str] = []
+    for line in (response or "").splitlines():
+        cleaned = re.sub(r"^\s*[\d.\-*)]+\s*", "", line).strip()
+        if cleaned and len(cleaned) <= MAX_TOPIC_LENGTH:
+            topics.append(cleaned)
+    return topics[:count]
+
+
+def _auto_queue_daily_videos(supabase) -> None:
+    """Preenche a fila automaticamente até bater a meta diária
+    (channels.daily_video_target) de cada canal ativo. Barata quando a meta
+    já foi atingida (só um count()), por isso é seguro chamar em toda
+    execução do worker (a cada 10 min via GitHub Actions)."""
+    today_start = (
+        datetime.now(timezone.utc)
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        .isoformat()
+    )
+
+    channels_resp = (
+        supabase.table("channels")
+        .select("*")
+        .eq("status", "active")
+        .gt("daily_video_target", 0)
+        .execute()
+    )
+    for channel in channels_resp.data or []:
+        target = channel["daily_video_target"]
+        count_resp = (
+            supabase.table("videos")
+            .select("id", count="exact")
+            .eq("channel_id", channel["id"])
+            .gte("created_at", today_start)
+            .execute()
+        )
+        missing = target - (count_resp.count or 0)
+        if missing <= 0:
+            continue
+
+        try:
+            creds = _fetch_credentials(supabase, channel["owner_id"])
+            topics = _suggest_topics(channel, creds, missing)
+        except Exception:  # noqa: BLE001 - um canal sem chave configurada não deve travar os outros
+            logger.exception(
+                f"falha ao sugerir temas automáticos pro canal {channel['id']} ({channel.get('name')})"
+            )
+            continue
+
+        if not topics:
+            logger.warning(
+                f"canal {channel.get('name')}: LLM não devolveu temas utilizáveis pra fila automática"
+            )
+            continue
+
+        rows = [
+            {
+                "owner_id": channel["owner_id"],
+                "channel_id": channel["id"],
+                "subject": topic,
+                "status": "queued",
+                "mode": "auto",
+            }
+            for topic in topics
+        ]
+        supabase.table("videos").insert(rows).execute()
+        logger.success(
+            f"canal {channel.get('name')}: {len(rows)} vídeo(s) adicionado(s) à fila automaticamente"
+        )
 
 
 def _apply_image_credentials(creds: dict[str, Any]) -> None:
@@ -612,6 +710,11 @@ def main(argv: list[str] | None = None) -> int:
 
     supabase = _get_supabase_client()
     logger.info("worker da Central de Canais Dark iniciado")
+
+    try:
+        _auto_queue_daily_videos(supabase)
+    except Exception:  # noqa: BLE001 - a fila automática nunca deve travar o processamento normal
+        logger.exception("falha ao preencher a fila automática diária")
 
     while True:
         video = _fetch_next_queued_video(supabase)
