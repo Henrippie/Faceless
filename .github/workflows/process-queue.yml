@@ -14,8 +14,11 @@ name: Process video queue
 
 on:
   schedule:
-    # A cada 10 minutos. Cron do GitHub Actions roda em UTC.
-    - cron: "*/10 * * * *"
+    # A cada 10 minutos, mas evitando os minutos "redondos" (:00, :10, :20...)
+    # — a própria documentação do GitHub Actions avisa que o `schedule` pode
+    # atrasar bastante justo nesses horários, por ser quando mais workflows
+    # de todo mundo disparam ao mesmo tempo.
+    - cron: "3-59/10 * * * *"
   workflow_dispatch: {}
 
 concurrency:
