@@ -52,6 +52,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --python 3.11
 
+      - name: Install ffmpeg
+        # ubuntu-latest não vem com ffmpeg pré-instalado (confirmado ao vivo:
+        # a primeira execução falhou com "ffmpeg: command not found").
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
       - name: Confirm ffmpeg is available
         run: ffmpeg -version
 
