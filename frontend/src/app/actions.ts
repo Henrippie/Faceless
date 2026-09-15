@@ -124,6 +124,7 @@ export type UpdateChannelInput = {
   customSystemPrompt: string;
   imagePromptTemplate: string;
   formats: string[];
+  dailyVideoTarget: number;
 };
 
 export async function updateChannel(channelId: string, input: UpdateChannelInput) {
@@ -139,6 +140,7 @@ export async function updateChannel(channelId: string, input: UpdateChannelInput
       custom_system_prompt: input.customSystemPrompt,
       image_prompt_template: input.imagePromptTemplate,
       formats: input.formats.length ? input.formats : ["vertical", "horizontal"],
+      daily_video_target: Math.max(0, Math.min(20, Math.trunc(input.dailyVideoTarget) || 0)),
     })
     .eq("id", channelId);
   if (error) throw new Error(error.message);

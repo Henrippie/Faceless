@@ -52,6 +52,7 @@ export function ChannelSettingsForm({
   });
   const [vertical, setVertical] = useState(channel.formats?.includes("vertical") ?? true);
   const [horizontal, setHorizontal] = useState(channel.formats?.includes("horizontal") ?? true);
+  const [dailyVideoTarget, setDailyVideoTarget] = useState(channel.daily_video_target ?? 0);
   const [isSaving, startSaving] = useTransition();
 
   const [platforms, setPlatforms] = useState<string[]>(channel.publish_platforms ?? []);
@@ -79,6 +80,7 @@ export function ChannelSettingsForm({
         await updateChannel(channel.id, {
           ...form,
           formats: [...(vertical ? ["vertical"] : []), ...(horizontal ? ["horizontal"] : [])],
+          dailyVideoTarget,
         });
         toast.success("Configurações do canal salvas.");
       } catch (error) {
@@ -336,6 +338,34 @@ export function ChannelSettingsForm({
               <Switch checked={horizontal} onCheckedChange={setHorizontal} />
               Horizontal (YouTube)
             </label>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Geração automática</CardTitle>
+            <CardDescription>
+              A cada 10 minutos o worker confere se este canal já bateu a
+              meta de hoje; se não, sugere temas novos por IA e adiciona à
+              fila sozinho. 0 desliga — só entra na fila o que você
+              adicionar manualmente.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-1.5">
+            <Label htmlFor="daily-video-target">Vídeos por dia</Label>
+            <Input
+              id="daily-video-target"
+              type="number"
+              min={0}
+              max={20}
+              className="w-24"
+              value={dailyVideoTarget}
+              onChange={(e) =>
+                setDailyVideoTarget(
+                  Math.max(0, Math.min(20, Number(e.target.value) || 0)),
+                )
+              }
+            />
           </CardContent>
         </Card>
 
